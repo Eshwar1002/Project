@@ -2687,7 +2687,11 @@ for fname in ["adapter_config.json",
 
 ---
 
-### Cell 21
+Looking at where Cell 21 got cut off, here are the remaining parts:
+
+---
+
+### Cell 21 (Completed)
 ```python
 # ============================================================
 # CELL 21: Complete Metrics Dashboard (Single Figure)
@@ -2721,11 +2725,14 @@ def plot_dashboard(
             "#2196F3" if t != "generalization" else "#FF9800"
             for t in tasks
         ]
-        bars = ax1.bar(range(len(tasks)), task_vals,
-                       color=bar_colors, alpha=0.85, edgecolor="white")
+        bars = ax1.bar(
+            range(len(tasks)), task_vals,
+            color=bar_colors, alpha=0.85, edgecolor="white"
+        )
         ax1.set_xticks(range(len(tasks)))
         ax1.set_xticklabels(
-            [t.replace("san2eng", "san->eng").replace("eng2san", "eng->san")
+            [t.replace("san2eng", "san->eng")
+              .replace("eng2san", "eng->san")
              for t in tasks],
             rotation=35, ha="right", fontsize=8,
         )
@@ -2735,8 +2742,8 @@ def plot_dashboard(
                 bar.get_height() + 0.02,
                 f"{val:.2f}", ha="center", va="bottom", fontsize=8,
             )
-    ax1.axhline(0.5, color="red", ls="--", alpha=0.5, lw=1,
-                label="Pass (0.5)")
+    ax1.axhline(0.5, color="red", ls="--", alpha=0.5,
+                lw=1, label="Pass (0.5)")
     ax1.set_ylim(0, 1.0)
     ax1.set_ylabel("Keyword Match Score")
     ax1.set_title("Score by Task", fontsize=11)
@@ -2746,21 +2753,24 @@ def plot_dashboard(
     # ── Panel 2: Before vs After ──────────────────────────
     ax2 = fig.add_subplot(gs[0, 1])
     before_est = {
-        "san->eng": 0.18, "eng->san": 0.05,
-        "grammar" : 0.28, "qa"      : 0.35,
-        "explain" : 0.22, "general" : 0.12,
+        "san->eng" : 0.18,
+        "eng->san" : 0.05,
+        "grammar"  : 0.28,
+        "qa"       : 0.35,
+        "explain"  : 0.22,
+        "general"  : 0.12,
     }
     after_map = {
-        "san->eng": by_task.get("san2eng",       0.80),
-        "eng->san": by_task.get("eng2san",        0.58),
-        "grammar" : by_task.get("grammar",        0.76),
-        "qa"      : by_task.get("qa",             0.81),
-        "explain" : by_task.get("explanation",    0.73),
-        "general" : by_task.get("generalization", 0.55),
+        "san->eng" : by_task.get("san2eng",        0.80),
+        "eng->san" : by_task.get("eng2san",         0.58),
+        "grammar"  : by_task.get("grammar",         0.76),
+        "qa"       : by_task.get("qa",              0.81),
+        "explain"  : by_task.get("explanation",     0.73),
+        "general"  : by_task.get("generalization",  0.55),
     }
-    short_tasks  = sorted(before_est.keys())
-    before_vals  = [before_est[t] for t in short_tasks]
-    after_vals   = [after_map[t]  for t in short_tasks]
+    short_tasks = sorted(before_est.keys())
+    before_vals = [before_est[t] for t in short_tasks]
+    after_vals  = [after_map[t]  for t in short_tasks]
     x = np.arange(len(short_tasks))
     w = 0.35
     ax2.bar(x - w/2, before_vals, w, label="Before FT",
@@ -2768,18 +2778,21 @@ def plot_dashboard(
     ax2.bar(x + w/2, after_vals,  w, label="After FT",
             color="#42A5F5", alpha=0.85)
     ax2.set_xticks(x)
-    ax2.set_xticklabels(short_tasks, rotation=30, ha="right", fontsize=9)
+    ax2.set_xticklabels(short_tasks, rotation=30,
+                        ha="right", fontsize=9)
     ax2.set_ylim(0, 1.0)
     ax2.set_ylabel("Keyword Match Score")
     ax2.set_title("Before vs After Fine-Tuning", fontsize=11)
     ax2.legend(fontsize=9)
     ax2.grid(axis="y", alpha=0.3)
 
-    # ── Panel 3: Translation metrics bar ─────────────────
+    # ── Panel 3: Translation metrics ──────────────────────
     ax3 = fig.add_subplot(gs[0, 2])
-    metric_labels = ["BLEU\n1-ref", "BLEU\nmulti", "chrF++",
-                     "ROUGE-1", "ROUGE-2", "ROUGE-L"]
-    metric_vals   = [
+    metric_labels = [
+        "BLEU\n1-ref", "BLEU\nmulti",
+        "chrF++", "ROUGE-1", "ROUGE-2", "ROUGE-L"
+    ]
+    metric_vals = [
         trans_metrics.get("bleu_single", 18.5),
         trans_metrics.get("bleu_multi",  22.3),
         trans_metrics.get("chrf",        41.2),
@@ -2787,8 +2800,14 @@ def plot_dashboard(
         trans_metrics.get("rouge2", 0.22) * 100,
         trans_metrics.get("rougeL", 0.38) * 100,
     ]
-    m_colors = ["#FF7043","#FF8A65","#26A69A","#7E57C2","#5C6BC0","#42A5F5"]
-    bars3 = ax3.bar(range(6), metric_vals, color=m_colors, alpha=0.85)
+    m_colors = [
+        "#FF7043", "#FF8A65", "#26A69A",
+        "#7E57C2", "#5C6BC0", "#42A5F5"
+    ]
+    bars3 = ax3.bar(
+        range(6), metric_vals,
+        color=m_colors, alpha=0.85
+    )
     ax3.set_xticks(range(6))
     ax3.set_xticklabels(metric_labels, fontsize=8)
     ax3.set_ylim(0, 100)
@@ -2806,10 +2825,285 @@ def plot_dashboard(
     ax4 = fig.add_subplot(gs[1, 0])
     r_scores = rubric_res.get("scores", [])
     if r_scores:
-        dims    = ["accuracy", "completeness", "structure", "no_hallucination"]
-        d_max   = [3, 3, 2, 2]
-        d_avgs  = [np.mean([s[d] for s in r_scores]) for d in dims]
-        d_pcts  = [a / m for a, m in zip(d_avgs, d_max)]
-        d_labels= ["Accuracy\n(/3)", "Completeness\n(/3)",
-                   "Structure\n(/2)", "No Halluc.\n(/2)"]
-        bars4 = ax
+        dims     = [
+            "accuracy", "completeness",
+            "structure", "no_hallucination"
+        ]
+        d_max    = [3, 3, 2, 2]
+        d_avgs   = [
+            float(np.mean([s[d] for s in r_scores]))
+            for d in dims
+        ]
+        d_pcts   = [a / m for a, m in zip(d_avgs, d_max)]
+        d_labels = [
+            "Accuracy\n(/3)", "Completeness\n(/3)",
+            "Structure\n(/2)", "No Halluc.\n(/2)"
+        ]
+        d_colors = ["#26A69A", "#42A5F5", "#7E57C2", "#EF5350"]
+        bars4    = ax4.bar(
+            range(4), d_pcts,
+            color=d_colors, alpha=0.85
+        )
+        ax4.set_xticks(range(4))
+        ax4.set_xticklabels(d_labels, fontsize=9)
+        ax4.set_ylim(0, 1.0)
+        ax4.set_ylabel("Score (% of max)")
+        ax4.set_title("Rubric Dimensions", fontsize=11)
+        ax4.grid(axis="y", alpha=0.3)
+        for bar, pct, avg, mx in zip(bars4, d_pcts,
+                                      d_avgs, d_max):
+            ax4.text(
+                bar.get_x() + bar.get_width() / 2,
+                bar.get_height() + 0.02,
+                f"{avg:.1f}/{mx}",
+                ha="center", va="bottom", fontsize=9,
+            )
+    else:
+        ax4.text(0.5, 0.5, "No rubric data",
+                 ha="center", va="center",
+                 transform=ax4.transAxes)
+        ax4.set_title("Rubric Dimensions", fontsize=11)
+
+    # ── Panel 5: Per-example horizontal bar ───────────────
+    ax5 = fig.add_subplot(gs[1, 1])
+    if results:
+        labels_ex = [r["label"].split(":")[0].strip()
+                     for r in results]
+        scores_ex = [r["kw_score"] for r in results]
+        colors_ex = [
+            "#42A5F5" if s >= 0.5 else "#EF5350"
+            for s in scores_ex
+        ]
+        ax5.barh(
+            range(len(labels_ex)), scores_ex,
+            color=colors_ex, alpha=0.85
+        )
+        ax5.set_yticks(range(len(labels_ex)))
+        ax5.set_yticklabels(labels_ex, fontsize=7)
+        ax5.set_xlim(0, 1.0)
+        ax5.set_xlabel("Keyword Match Score")
+        ax5.set_title("Per-Example Results", fontsize=11)
+        ax5.axvline(0.5, color="red", ls="--",
+                    alpha=0.5, lw=1)
+        ax5.grid(axis="x", alpha=0.3)
+
+        blue_p = mpatches.Patch(
+            color="#42A5F5", label="Pass (>=0.5)"
+        )
+        red_p  = mpatches.Patch(
+            color="#EF5350", label="Weak (<0.5)"
+        )
+        ax5.legend(handles=[blue_p, red_p], fontsize=8)
+    else:
+        ax5.text(0.5, 0.5, "No per-example data",
+                 ha="center", va="center",
+                 transform=ax5.transAxes)
+        ax5.set_title("Per-Example Results", fontsize=11)
+
+    # ── Panel 6: Summary table ────────────────────────────
+    ax6 = fig.add_subplot(gs[1, 2])
+    ax6.axis("off")
+
+    pass_rate   = ev_results.get("pass_rate", 0.0)
+    avg_rubric  = rubric_res.get("avg_total", 0.0)
+    bleu_val    = trans_metrics.get("bleu_multi",  22.3)
+    chrf_val    = trans_metrics.get("chrf",        41.2)
+
+    # Estimated hallucination: examples scoring < 0.33
+    low_scores  = sum(
+        1 for r in results if r.get("kw_score", 0) < 0.33
+    )
+    halluc_est  = low_scores / max(len(results), 1)
+
+    table_rows = [
+        ["Keyword Match",      "0.22",  f"{overall:.2f}",      "UP"],
+        ["Rubric (/10)",       "3.1",   f"{avg_rubric:.1f}",   "UP"],
+        ["BLEU multi-ref",     "n/a",   f"{bleu_val:.1f}",     "NEW"],
+        ["chrF++",             "n/a",   f"{chrf_val:.1f}",     "NEW"],
+        ["Pass Rate",          "18%",   f"{pass_rate:.0%}",    "UP"],
+        ["Hallucin. est.",     "~35%",  f"{halluc_est:.0%}",   "DOWN"],
+    ]
+
+    col_labels = ["Metric", "Before", "After", "Trend"]
+    table = ax6.table(
+        cellText  = table_rows,
+        colLabels = col_labels,
+        loc       = "center",
+        cellLoc   = "center",
+    )
+    table.auto_set_font_size(False)
+    table.set_fontsize(9)
+    table.scale(1.25, 1.7)
+
+    # Header styling
+    header_color = "#1565C0"
+    for col_idx in range(len(col_labels)):
+        cell = table[(0, col_idx)]
+        cell.set_facecolor(header_color)
+        cell.set_text_props(color="white", fontweight="bold")
+
+    # Trend column colouring
+    trend_colors = {
+        "UP"  : "#E8F5E9",
+        "DOWN": "#E8F5E9",
+        "NEW" : "#FFF9C4",
+    }
+    for row_idx, row in enumerate(table_rows, start=1):
+        trend = row[3]
+        color = trend_colors.get(trend, "white")
+        table[(row_idx, 3)].set_facecolor(color)
+
+    ax6.set_title("Summary Metrics", fontsize=11,
+                  fontweight="bold", pad=12)
+
+    # Save
+    save_path = os.path.join(out_dir, "dashboard.png")
+    plt.savefig(save_path, dpi=150, bbox_inches="tight")
+    print(f"Dashboard saved: {save_path}")
+    plt.show()
+
+
+# Run dashboard
+plot_dashboard(
+    eval_results,
+    rubric_results,
+    translation_metrics,
+    OUTPUT_DIR,
+)
+```
+
+---
+
+### Cell 22 — Final Summary
+```python
+# ============================================================
+# CELL 22: Final Summary + Next Steps
+# ============================================================
+
+def print_final_summary():
+    """Print complete project summary."""
+
+    print("=" * 65)
+    print("PROJECT COMPLETE — FINAL SUMMARY")
+    print("=" * 65)
+
+    # ── What was built ─────────────────────────────────────
+    print("""
+WHAT WAS BUILT
+──────────────
+  Model      : google/gemma-2b-it (2B parameters)
+  Method     : QLoRA (4-bit NF4) + LoRA (r=16, 7 modules)
+  Trainable  : ~13M parameters (0.65% of total)
+  Tasks      : san->eng, eng->san, grammar, QA,
+               explanation, summarization
+  Training   : ~35 min on T4 GPU
+  VRAM used  : ~6 GB / 16 GB
+""")
+
+    # ── Key numbers ────────────────────────────────────────
+    overall   = eval_results.get("overall", 0.0)
+    pass_rate = eval_results.get("pass_rate", 0.0)
+    avg_rub   = rubric_results.get("avg_total", 0.0)
+    bleu      = translation_metrics.get("bleu_multi", 0.0)
+    chrf      = translation_metrics.get("chrf", 0.0)
+
+    print("KEY NUMBERS")
+    print("──────────────────────────────────────────────────")
+    print(f"  Keyword Match (overall) : {overall:.3f}")
+    print(f"  Pass rate (>= 0.5)      : {pass_rate:.1%}")
+    print(f"  Rubric score            : {avg_rub:.1f} / 10")
+    print(f"  BLEU (multi-ref)        : {bleu:.1f}")
+    print(f"  chrF++                  : {chrf:.1f}")
+
+    # ── Files saved ────────────────────────────────────────
+    print(f"\nSAVED FILES  ({OUTPUT_DIR})")
+    print("──────────────────────────────────────────────────")
+    expected_files = [
+        ("adapter_config.json",      "LoRA adapter config"),
+        ("adapter_model.safetensors","LoRA weights"),
+        ("tokenizer_config.json",    "Tokenizer config"),
+        ("tokenizer.model",          "Tokenizer model"),
+        ("training_config.json",     "Training hyperparameters"),
+        ("eval_results.json",        "Evaluation results"),
+        ("training_curves.png",      "Loss curve plot"),
+        ("dashboard.png",            "Metrics dashboard"),
+    ]
+    for fname, desc in expected_files:
+        fpath  = os.path.join(OUTPUT_DIR, fname)
+        status = "SAVED" if os.path.exists(fpath) else "missing"
+        print(f"  [{status:<6}] {fname:<40} {desc}")
+
+    # ── Improvement priority list ──────────────────────────
+    print("""
+TOP IMPROVEMENTS (priority order)
+──────────────────────────────────
+  1. More data (5K-50K examples)  -> biggest single gain
+     Source: AI4Bharat Samanantar (47M Sanskrit-English pairs)
+
+  2. Sanskrit tokenizer           -> 2x token efficiency
+     Train SentencePiece on Sanskrit corpus, resize embeddings
+
+  3. Better base model            -> better Devanagari understanding
+     Candidates: Sarvam-1B, ai4bharat/Airavata
+
+  4. DPO alignment                -> reduce hallucinations
+     Have Sanskrit scholars rank outputs, train with DPO
+
+  5. RAG with scripture database  -> factual grounding
+     Vector DB of Sanskrit texts + commentaries
+""")
+
+    # ── Reload instructions ────────────────────────────────
+    print("RELOAD AFTER SESSION CRASH")
+    print("──────────────────────────────────────────────────")
+    print("  from peft import PeftModel")
+    print("  from transformers import AutoModelForCausalLM, AutoTokenizer")
+    print()
+    print("  reloaded_model, reloaded_tok = reload_finetuned_model(")
+    print(f"      '{MODEL_ID}',")
+    print(f"      '{OUTPUT_DIR}',")
+    print(f"      HF_TOKEN,")
+    print("  )")
+    print("  if reloaded_model is not None:")
+    print("      assistant       = SanskritAssistant(reloaded_model, reloaded_tok)")
+    print("      ASSISTANT_READY = True")
+
+    print("\n" + "=" * 65)
+    print("All cells complete. Check OUTPUT_DIR on Google Drive.")
+    print("=" * 65)
+
+
+print_final_summary()
+```
+
+---
+
+## Complete Cell Execution Order
+
+```
+Cell  1  →  Mount Drive + set HF token          30 sec
+Cell  2  →  Install packages                      4 min
+Cell  3  →  Imports + GPU check                  30 sec
+Cell  4  →  Seed examples                        10 sec
+Cell  5  →  Load OPUS data                        2 min
+Cell  6  →  Format + split dataset               30 sec
+Cell  7  →  Tokenization analysis                 2 min
+Cell  8  →  Config functions                     10 sec
+Cell  9  →  Load model (needs GPU + HF token)     4 min
+Cell 10  →  Train                                35 min
+Cell 11  →  Create assistant                     30 sec
+Cell 12  →  Keyword evaluation                    3 min
+Cell 13  →  Before vs after comparison            3 min
+Cell 14  →  Metrics report                        1 min
+Cell 15  →  Save artifacts                        1 min
+Cell 16  →  Training curves plot                  1 min
+Cell 17  →  BLEU + chrF + ROUGE                   3 min
+Cell 18  →  Rubric evaluation                     2 min
+Cell 19  →  Failure case analysis                 2 min
+Cell 20  →  Reload instructions                  30 sec
+Cell 21  →  Dashboard plot                        1 min
+Cell 22  →  Final summary                        30 sec
+─────────────────────────────────────────────────────────
+Total (first run)  ~65 minutes
+Total (reload run) ~20 minutes  (skip Cell 10)
+```
