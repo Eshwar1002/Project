@@ -1,0 +1,2103 @@
+Complete Sanskrit-English Multilingual Embedding Model - Fixed & Enhanced
+Let me provide the complete, corrected implementation with all cells fixed and the final report completed.
+
+Cell 1: Install Dependencies
+# Install all required packages
+!pip install -q sentence-transformers==2.7.0
+!pip install -q datasets
+!pip install -q transformers
+!pip install -q torch
+!pip install -q faiss-cpu
+!pip install -q accelerate
+!pip install -q tqdm
+!pip install -q matplotlib
+!pip install -q seaborn
+!pip install -q pandas
+!pip install -q numpy
+!pip install -q scikit-learn
+
+print("✅ All packages installed successfully!")
+Cell 2: Imports and Setup
+import os
+import json
+import random
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+from tqdm import tqdm
+from typing import List, Dict, Tuple, Optional
+import warnings
+warnings.filterwarnings('ignore')
+
+import torch
+import torch.nn as nn
+from torch.utils.data import DataLoader, Dataset
+
+from sentence_transformers import (
+    SentenceTransformer,
+    InputExample,
+    losses,
+    evaluation,
+    util
+)
+from sentence_transformers.evaluation import (
+    InformationRetrievalEvaluator,
+    EmbeddingSimilarityEvaluator
+)
+
+from datasets import load_dataset
+import faiss
+from sklearn.metrics.pairwise import cosine_similarity
+from sklearn.manifold import TSNE
+
+# ── Reproducibility ──
+SEED = 42
+random.seed(SEED)
+np.random.seed(SEED)
+torch.manual_seed(SEED)
+if torch.cuda.is_available():
+    torch.cuda.manual_seed_all(SEED)
+
+# ── Device configuration ──
+DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+print(f"🖥️  Device: {DEVICE}")
+if torch.cuda.is_available():
+    print(f"   GPU: {torch.cuda.get_device_name(0)}")
+    print(f"   VRAM: {torch.cuda.get_device_properties(0).total_memory / 1e9:.1f} GB")
+
+print(f"\n✅ Setup complete!")
+Cell 3: Dataset Construction
+# ============================================================
+# DATASET CONSTRUCTION
+# Rich Sanskrit-English aligned corpus from the Bhagavad Gita
+# ============================================================
+
+class BhagavadGitaCorpusBuilder:
+    """
+    Builds a Sanskrit-English aligned corpus for retrieval training.
+    
+    Data Sources:
+    1. Authentic Bhagavad Gita verses (all 18 chapters represented)
+    2. Synthetic query generation for retrieval pairs
+    3. Hard negative mining
+    """
+    
+    def __init__(self):
+        self.verses = []
+        self.queries = []
+        self.triplets = []
+    
+    def build_core_corpus(self) -> List[Dict]:
+        """
+        Authentic Bhagavad Gita verses with Sanskrit, transliteration,
+        English translation, and thematic tags.
+        Public domain translations.
+        """
+        
+        corpus = [
+            # ─── Chapter 1: Arjuna's Dilemma ───
+            {
+                "id": "BG_1_1",
+                "chapter": 1, "verse": 1,
+                "sanskrit": "धृतराष्ट्र उवाच | धर्मक्षेत्रे कुरुक्षेत्रे समवेता युयुत्सवः | मामकाः पाण्डवाश्चैव किमकुर्वत सञ्जय ||",
+                "transliteration": "dhritarashtra uvaacha | dharmakshetre kurukshetre samaveta yuyutsavah | mamakah pandavashchaiva kimakurvata sanjaya",
+                "translation": "Dhritarashtra said: O Sanjaya, after my sons and the sons of Pandu assembled in the place of pilgrimage at Kurukshetra, desiring to fight, what did they do?",
+                "themes": ["war", "dharma", "duty", "kurukshetra", "family conflict"],
+                "keywords": ["dhritarashtra", "kurukshetra", "pandava", "sanjaya", "battle"]
+            },
+            {
+                "id": "BG_1_28",
+                "chapter": 1, "verse": 28,
+                "sanskrit": "अर्जुन उवाच | दृष्ट्वेमं स्वजनं कृष्ण युयुत्सुं समुपस्थितम् | सीदन्ति मम गात्राणि मुखं च परिशुष्यति ||",
+                "transliteration": "arjuna uvaacha | drishtvedam svajanam krishna yuyutsum samupasthitam | seedanti mama gatrani mukham cha parishushyati",
+                "translation": "Arjuna said: My dear Krishna, seeing my friends and relatives present before me in such a fighting spirit, I feel the limbs of my body quivering and my mouth drying up.",
+                "themes": ["grief", "weakness", "family", "war", "emotion", "arjuna's dilemma"],
+                "keywords": ["arjuna", "weakness", "relatives", "grief", "battle"]
+            },
+            
+            # ─── Chapter 2: Sankhya Yoga ───
+            {
+                "id": "BG_2_11",
+                "chapter": 2, "verse": 11,
+                "sanskrit": "श्रीभगवानुवाच | अशोच्यानन्वशोचस्त्वं प्रज्ञावादांश्च भाषसे | गतासूनगतासूंश्च नानुशोचन्ति पण्डिताः ||",
+                "transliteration": "shree bhagavaanuvaacha | ashochyaananvashochastvam pragyavadanshcha bhashase | gataasoonagataasoonscha naanushochanti panditaah",
+                "translation": "The Supreme Personality of Godhead said: While speaking learned words, you are mourning for what is not worthy of grief. Those who are wise lament neither for the living nor for the dead.",
+                "themes": ["wisdom", "grief", "death", "soul", "knowledge", "mourning"],
+                "keywords": ["grief", "wisdom", "soul", "death", "mourning", "pandita"]
+            },
+            {
+                "id": "BG_2_13",
+                "chapter": 2, "verse": 13,
+                "sanskrit": "देहिनोऽस्मिन्यथा देहे कौमारं यौवनं जरा | तथा देहान्तरप्राप्तिर्धीरस्तत्र न मुह्यति ||",
+                "transliteration": "dehino asmin yatha dehe kaumaram yauvanam jara | tatha dehantarapraptir dhiras tatra na muhyati",
+                "translation": "As the embodied soul continuously passes, in this body, from boyhood to youth to old age, the soul similarly passes into another body at death. A sober person is not bewildered by such a change.",
+                "themes": ["soul", "reincarnation", "death", "body", "transmigration", "atma"],
+                "keywords": ["soul", "body", "death", "reincarnation", "atma", "transmigration", "cycle of life"]
+            },
+            {
+                "id": "BG_2_17",
+                "chapter": 2, "verse": 17,
+                "sanskrit": "अविनाशि तु तद्विद्धि येन सर्वमिदं ततम् | विनाशमव्ययस्यास्य न कश्चित्कर्तुमर्हति ||",
+                "transliteration": "avinaashi tu tadviddhi yena sarvamidam tatam | vinaashamavyayasyaasya na kashchitkartumarhati",
+                "translation": "That which pervades the entire body you should know to be indestructible. No one is able to destroy that imperishable soul.",
+                "themes": ["soul", "imperishable", "indestructible", "eternal", "atma", "brahman"],
+                "keywords": ["indestructible", "soul", "eternal", "imperishable", "pervades", "atma"]
+            },
+            {
+                "id": "BG_2_19",
+                "chapter": 2, "verse": 19,
+                "sanskrit": "य एनं वेत्ति हन्तारं यश्चैनं मन्यते हतम् | उभौ तौ न विजानीतो नायं हन्ति न हन्यते ||",
+                "transliteration": "ya enam vetti hantaram yashchainam manyate hatam | ubhau tau na vijanito nayam hanti na hanyate",
+                "translation": "Neither he who thinks the living entity the slayer nor he who thinks it slain is in knowledge, for the self slays not nor is slain.",
+                "themes": ["soul", "death", "killing", "eternal", "atma", "knowledge"],
+                "keywords": ["soul", "kill", "slay", "eternal", "knowledge", "atma"]
+            },
+            {
+                "id": "BG_2_20",
+                "chapter": 2, "verse": 20,
+                "sanskrit": "न जायते म्रियते वा कदाचिन्नायं भूत्वा भविता वा न भूयः | अजो नित्यः शाश्वतोऽयं पुराणो न हन्यते हन्यमाने शरीरे ||",
+                "transliteration": "na jayate mriyate va kadachin nayam bhutva bhavita va na bhuyah | ajo nityah shashvato yam purano na hanyate hanyamane sharire",
+                "translation": "The soul is never born nor dies at any time. It has not come into being, does not come into being, and will not come into being. It is unborn, eternal, ever-existing, and primeval. It is not slain when the body is slain.",
+                "themes": ["soul", "immortality", "eternal", "birth", "death", "atma", "body"],
+                "keywords": ["soul", "unborn", "eternal", "immortal", "death", "body", "atma", "never dies"]
+            },
+            {
+                "id": "BG_2_22",
+                "chapter": 2, "verse": 22,
+                "sanskrit": "वासांसि जीर्णानि यथा विहाय नवानि गृह्णाति नरोऽपराणि | तथा शरीराणि विहाय जीर्णान्यन्यानि संयाति नवानि देही ||",
+                "transliteration": "vasamsi jirnani yatha vihaya navani grihnati naro parani | tatha sharirani vihaya jirnany anyani samyati navani dehi",
+                "translation": "As a person puts on new garments, giving up old ones, the soul similarly accepts new material bodies, giving up the old and useless ones.",
+                "themes": ["soul", "reincarnation", "body", "rebirth", "transmigration", "clothing metaphor"],
+                "keywords": ["soul", "body", "reincarnation", "new body", "garments", "rebirth", "old body"]
+            },
+            {
+                "id": "BG_2_47",
+                "chapter": 2, "verse": 47,
+                "sanskrit": "कर्मण्येवाधिकारस्ते मा फलेषु कदाचन | मा कर्मफलहेतुर्भूर्मा ते सङ्गोऽस्त्वकर्मणि ||",
+                "transliteration": "karmanye vadhikaraste ma phaleshu kadachana | ma karma phala hetur bhur ma te sango stv akarmani",
+                "translation": "You have a right to perform your prescribed duty, but you are not entitled to the fruits of action. Never consider yourself the cause of the results of your activities, and never be attached to not doing your duty.",
+                "themes": ["karma", "duty", "action", "detachment", "results", "dharma", "nishkama karma"],
+                "keywords": ["karma", "duty", "action", "fruits", "detachment", "dharma", "work", "nishkama"]
+            },
+            {
+                "id": "BG_2_48",
+                "chapter": 2, "verse": 48,
+                "sanskrit": "योगस्थः कुरु कर्माणि सङ्गं त्यक्त्वा धनञ्जय | सिद्ध्यसिद्ध्योः समो भूत्वा समत्वं योग उच्यते ||",
+                "transliteration": "yogasthah kuru karmani sangam tyaktva dhananjaya | siddhyasiddhyoh samo bhutva samatvam yoga uchyate",
+                "translation": "Be steadfast in yoga, O Arjuna. Perform your duty and abandon all attachment to success or failure. Such evenness of mind is called yoga.",
+                "themes": ["yoga", "equanimity", "karma", "success", "failure", "balance", "nishkama karma"],
+                "keywords": ["yoga", "duty", "attachment", "success", "failure", "equanimity", "balance"]
+            },
+            {
+                "id": "BG_2_50",
+                "chapter": 2, "verse": 50,
+                "sanskrit": "बुद्धियुक्तो जहातीह उभे सुकृतदुष्कृते | तस्माद्योगाय युज्यस्व योगः कर्मसु कौशलम् ||",
+                "transliteration": "buddhiyukto jahatiha ubhe sukrita-dushkrite | tasmad yogaya yujyasva yogah karmasu kaushalam",
+                "translation": "A man engaged in devotional service rids himself of both good and bad actions even in this life. Therefore strive for yoga, which is the art of all work.",
+                "themes": ["yoga", "karma", "good deeds", "bad deeds", "skill", "devotion"],
+                "keywords": ["yoga", "karma", "good", "bad", "skill", "action", "art", "devotion"]
+            },
+            
+            # ─── Chapter 3: Karma Yoga ───
+            {
+                "id": "BG_3_3",
+                "chapter": 3, "verse": 3,
+                "sanskrit": "श्रीभगवानुवाच | लोकेऽस्मिन्द्विविधा निष्ठा पुरा प्रोक्ता मयानघ | ज्ञानयोगेन साङ्ख्यानां कर्मयोगेन योगिनाम् ||",
+                "transliteration": "shri bhagavan uvacha | loke smin dvividha nishtha pura prokta mayanagha | jnanayogena sankhyanam karmayogena yoginam",
+                "translation": "The Supreme Personality of Godhead said: O sinless Arjuna, I have already explained that there are two classes of men who try to realize the self. Some are inclined to understand it by empirical, philosophical speculation, and others are inclined to understand it by devotional work.",
+                "themes": ["jnana yoga", "karma yoga", "paths", "self-realization", "knowledge", "action"],
+                "keywords": ["jnana yoga", "karma yoga", "path", "knowledge", "action", "self-realization"]
+            },
+            {
+                "id": "BG_3_8",
+                "chapter": 3, "verse": 8,
+                "sanskrit": "नियतं कुरु कर्म त्वं कर्म ज्यायो ह्यकर्मणः | शरीरयात्रापि च ते न प्रसिद्ध्येदकर्मणः ||",
+                "transliteration": "niyatam kuru karma tvam karma jyayo hyakarmanah | sharirayatrapi cha te na prasiddhyed akarmanah",
+                "translation": "Perform your prescribed duty, for action is better than inaction. A man cannot even maintain his physical body without work.",
+                "themes": ["action", "inaction", "duty", "karma", "work", "body"],
+                "keywords": ["action", "inaction", "duty", "work", "prescribed", "body", "karma"]
+            },
+            {
+                "id": "BG_3_16",
+                "chapter": 3, "verse": 16,
+                "sanskrit": "एवं प्रवर्तितं चक्रं नानुवर्तयतीह यः | अघायुरिन्द्रियारामो मोघं पार्थ स जीवति ||",
+                "transliteration": "evam pravartitam chakram nanuvartayatiha yah | aghayur indriyaramo mogham partha sa jivati",
+                "translation": "My dear Arjuna, one who does not follow in human life the cycle of sacrifice thus established by the Vedas certainly leads a life full of sin. Living only for the satisfaction of the senses, such a person lives in vain.",
+                "themes": ["sacrifice", "sin", "senses", "duty", "cosmic order", "vedas"],
+                "keywords": ["sacrifice", "sin", "senses", "vedas", "cycle", "duty"]
+            },
+            {
+                "id": "BG_3_19",
+                "chapter": 3, "verse": 19,
+                "sanskrit": "तस्मादसक्तः सततं कार्यं कर्म समाचर | असक्तो ह्याचरन्कर्म परमाप्नोति पूरुषः ||",
+                "transliteration": "tasmad asaktah satatam karyam karma samachara | asakto hyacharan karma param apnoti purushah",
+                "translation": "Therefore, without being attached to the fruits of activities, one should act as a matter of duty, for by working without attachment one attains the Supreme.",
+                "themes": ["detachment", "duty", "action", "liberation", "karma yoga", "supreme"],
+                "keywords": ["detachment", "duty", "action", "fruits", "liberation", "work", "supreme"]
+            },
+            {
+                "id": "BG_3_27",
+                "chapter": 3, "verse": 27,
+                "sanskrit": "प्रकृतेः क्रियमाणानि गुणैः कर्माणि सर्वशः | अहङ्कारविमूढात्मा कर्ताहमिति मन्यते ||",
+                "transliteration": "prakriteḥ kriyamanani gunaiḥ karmani sarvashaḥ | ahankara-vimudhatma kartaham iti manyate",
+                "translation": "The spirit soul bewildered by the influence of false ego thinks himself the doer of activities that are in actuality carried out by the three modes of material nature.",
+                "themes": ["ego", "nature", "gunas", "action", "illusion", "prakrti"],
+                "keywords": ["ego", "nature", "modes", "action", "illusion", "false ego", "prakrti", "gunas"]
+            },
+            
+            # ─── Chapter 4: Jnana Yoga ───
+            {
+                "id": "BG_4_7",
+                "chapter": 4, "verse": 7,
+                "sanskrit": "यदा यदा हि धर्मस्य ग्लानिर्भवति भारत | अभ्युत्थानमधर्मस्य तदात्मानं सृजाम्यहम् ||",
+                "transliteration": "yada yada hi dharmasya glanir bhavati bharata | abhyutthanam adharmasya tadatmanam srijamyaham",
+                "translation": "Whenever and wherever there is a decline in religious practice, O descendant of Bharata, and a predominant rise of irreligion—at that time I descend Myself.",
+                "themes": ["avatar", "dharma", "god", "incarnation", "divine intervention", "adharma"],
+                "keywords": ["avatar", "dharma", "decline", "incarnation", "god", "adharma", "divine", "vishnu"]
+            },
+            {
+                "id": "BG_4_8",
+                "chapter": 4, "verse": 8,
+                "sanskrit": "परित्राणाय साधूनां विनाशाय च दुष्कृताम् | धर्मसंस्थापनार्थाय सम्भवामि युगे युगे ||",
+                "transliteration": "paritranaya sadhunam vinashaya cha dushkritam | dharma-samsthapanarthaya sambhavami yuge yuge",
+                "translation": "To deliver the pious and to annihilate the miscreants, as well as to reestablish the principles of religion, I Myself appear, millennium after millennium.",
+                "themes": ["avatar", "dharma", "protection", "evil", "divine intervention", "yugas"],
+                "keywords": ["avatar", "protect", "righteous", "evil", "dharma", "age", "millennium", "yuga"]
+            },
+            {
+                "id": "BG_4_11",
+                "chapter": 4, "verse": 11,
+                "sanskrit": "ये यथा मां प्रपद्यन्ते तांस्तथैव भजाम्यहम् | मम वर्त्मानुवर्तन्ते मनुष्याः पार्थ सर्वशः ||",
+                "transliteration": "ye yatha mam prapadyante tams tathaiva bhajamy aham | mama vartmanuvartante manushyah partha sarvashah",
+                "translation": "As all surrender unto Me, I reward them accordingly. Everyone follows My path in all respects, O son of Pritha.",
+                "themes": ["devotion", "surrender", "god", "reward", "paths", "bhakti"],
+                "keywords": ["surrender", "devotion", "god", "reward", "path", "worship", "bhakti"]
+            },
+            {
+                "id": "BG_4_34",
+                "chapter": 4, "verse": 34,
+                "sanskrit": "तद्विद्धि प्रणिपातेन परिप्रश्नेन सेवया | उपदेक्ष्यन्ति ते ज्ञानं ज्ञानिनस्तत्त्वदर्शिनः ||",
+                "transliteration": "tad viddhi pranipatena pariprashnena sevaya | upadekshyanti te jnanam jnaninas tattva-darshinah",
+                "translation": "Just try to learn the truth by approaching a spiritual master. Inquire from him submissively and render service unto him. The self-realized souls can impart knowledge unto you because they have seen the truth.",
+                "themes": ["guru", "knowledge", "disciple", "spiritual master", "truth", "learning"],
+                "keywords": ["guru", "teacher", "knowledge", "disciple", "truth", "spiritual master", "learn", "wisdom"]
+            },
+            
+            # ─── Chapter 5: Karma Sannyasa Yoga ───
+            {
+                "id": "BG_5_10",
+                "chapter": 5, "verse": 10,
+                "sanskrit": "ब्रह्मण्याधाय कर्माणि सङ्गं त्यक्त्वा करोति यः | लिप्यते न स पापेन पद्मपत्रमिवाम्भसा ||",
+                "transliteration": "brahmany adhaya karmani sangam tyaktva karoti yah | lipyate na sa papena padmapatram ivambhasa",
+                "translation": "One who performs his duty without attachment, surrendering the results unto the Supreme Lord, is unaffected by sinful action, as the lotus leaf is untouched by water.",
+                "themes": ["detachment", "duty", "lotus", "sin", "surrender", "god", "purity"],
+                "keywords": ["detachment", "duty", "lotus", "sin", "surrender", "pure", "action", "water"]
+            },
+            {
+                "id": "BG_5_18",
+                "chapter": 5, "verse": 18,
+                "sanskrit": "विद्याविनयसम्पन्ने ब्राह्मणे गवि हस्तिनि | शुनि चैव श्वपाके च पण्डिताः समदर्शिनः ||",
+                "transliteration": "vidya-vinaya-sampanne brahmane gavi hastini | shuni chaiva shvapake cha panditah sama-darshinah",
+                "translation": "The humble sages, by virtue of true knowledge, see with equal vision a learned and gentle brahmana, a cow, an elephant, a dog, and a dog-eater.",
+                "themes": ["equality", "wisdom", "vision", "unity", "brahman", "all beings"],
+                "keywords": ["equality", "wisdom", "equal vision", "all beings", "unity", "brahman", "sage"]
+            },
+            
+            # ─── Chapter 6: Dhyana Yoga ───
+            {
+                "id": "BG_6_5",
+                "chapter": 6, "verse": 5,
+                "sanskrit": "उद्धरेदात्मनात्मानं नात्मानमवसादयेत् | आत्मैव ह्यात्मनो बन्धुरात्मैव रिपुरात्मनः ||",
+                "transliteration": "uddhared atmanatmanam natmanam avasadayet | atmaiva hy atmaño bandhur atmaiva ripur atmanah",
+                "translation": "One must deliver himself with the help of his mind, and not degrade himself. The mind is the friend of the conditioned soul, and his enemy as well.",
+                "themes": ["mind", "self", "friend", "enemy", "liberation", "meditation"],
+                "keywords": ["mind", "self", "friend", "enemy", "liberation", "meditation", "elevate", "degrade"]
+            },
+            {
+                "id": "BG_6_6",
+                "chapter": 6, "verse": 6,
+                "sanskrit": "बन्धुरात्मात्मनस्तस्य येनात्मैवात्मना जितः | अनात्मनस्तु शत्रुत्वे वर्तेतात्मैव शत्रुवत् ||",
+                "transliteration": "bandhur atmatmanas tasya yenatmaivätmana jitah | anatmanas tu shatrutve vartetatmaiva shatruvat",
+                "translation": "For him who has conquered the mind, the mind is the best of friends; but for one who has failed to do so, his very mind will be the greatest enemy.",
+                "themes": ["mind", "self-control", "friend", "enemy", "victory", "meditation"],
+                "keywords": ["mind", "control", "friend", "enemy", "conquer", "self-control", "victory"]
+            },
+            {
+                "id": "BG_6_17",
+                "chapter": 6, "verse": 17,
+                "sanskrit": "युक्ताहारविहारस्य युक्तचेष्टस्य कर्मसु | युक्तस्वप्नावबोधस्य योगो भवति दुःखहा ||",
+                "transliteration": "yuktahara-viharasya yukta-ceshtasya karmasu | yukta-svapnavabodhasya yogo bhavati duhkha-ha",
+                "translation": "He who is regulated in his habits of eating, sleeping, recreation and work can mitigate all material pains by practicing the yoga system.",
+                "themes": ["yoga", "discipline", "balance", "eating", "sleeping", "health", "practice"],
+                "keywords": ["yoga", "discipline", "balance", "eating", "sleep", "work", "practice", "health"]
+            },
+            {
+                "id": "BG_6_34",
+                "chapter": 6, "verse": 34,
+                "sanskrit": "चञ्चलं हि मनः कृष्ण प्रमाथि बलवद्दृढम् | तस्याहं निग्रहं मन्ये वायोरिव सुदुष्करम् ||",
+                "transliteration": "chanchalam hi manah krishna pramathi balavad dridham | tasyaham nigraham manye vayor iva sudushkaram",
+                "translation": "For the mind is restless, turbulent, obstinate and very strong, O Krishna, and to subdue it, I think, is more difficult than controlling the wind.",
+                "themes": ["mind", "restless", "control", "difficulty", "meditation", "yoga"],
+                "keywords": ["mind", "restless", "turbulent", "control", "wind", "difficult", "meditation"]
+            },
+            
+            # ─── Chapter 7: Jnana-Vijnana Yoga ───
+            {
+                "id": "BG_7_7",
+                "chapter": 7, "verse": 7,
+                "sanskrit": "मत्तः परतरं नान्यत्किञ्चिदस्ति धनञ्जय | मयि सर्वमिदं प्रोतं सूत्रे मणिगणा इव ||",
+                "transliteration": "mattah parataram nanyat kinchid asti dhananjaya | mayi sarvam idam protam sutre mani-gana iva",
+                "translation": "O conqueror of wealth, there is no truth superior to Me. Everything rests upon Me, as pearls are strung on a thread.",
+                "themes": ["brahman", "supreme", "god", "unity", "creation", "krishna"],
+                "keywords": ["supreme", "god", "truth", "creation", "pearls", "thread", "unity", "brahman", "krishna"]
+            },
+            {
+                "id": "BG_7_14",
+                "chapter": 7, "verse": 14,
+                "sanskrit": "दैवी ह्येषा गुणमयी मम माया दुरत्यया | मामेव ये प्रपद्यन्ते मायामेतां तरन्ति ते ||",
+                "transliteration": "daivi hy esha guna-mayi mama maya duratyaya | mam eva ye prapadyante mayam etam taranti te",
+                "translation": "This divine energy of Mine, consisting of the three modes of material nature, is difficult to overcome. But those who have surrendered unto Me can easily cross beyond it.",
+                "themes": ["maya", "illusion", "surrender", "liberation", "gunas", "divine energy"],
+                "keywords": ["maya", "illusion", "surrender", "liberation", "gunas", "divine", "overcome"]
+            },
+            
+            # ─── Chapter 8: Akshara Brahman Yoga ───
+            {
+                "id": "BG_8_7",
+                "chapter": 8, "verse": 7,
+                "sanskrit": "तस्मात्सर्वेषु कालेषु मामनुस्मर युध्य च | मय्यर्पितमनोबुद्धिर्मामेवैष्यस्यसंशयम् ||",
+                "transliteration": "tasmaat sarveshu kaaleshu mam anusmara yudhya cha | mayyarpita-mano-buddhir mam evaishhyasy asanshayam",
+                "translation": "Therefore, Arjuna, you should always think of Me in the form of Krishna and at the same time carry out your prescribed duty of fighting. With your activities dedicated to Me and your mind and intelligence fixed on Me, you will attain Me without doubt.",
+                "themes": ["remembrance", "god", "devotion", "duty", "meditation", "bhakti"],
+                "keywords": ["remember", "god", "devotion", "duty", "meditation", "think", "krishna", "bhakti"]
+            },
+            {
+                "id": "BG_8_16",
+                "chapter": 8, "verse": 16,
+                "sanskrit": "आब्रह्मभुवनाल्लोकाः पुनरावर्तिनोऽर्जुन | मामुपेत्य तु कौन्तेय पुनर्जन्म न विद्यते ||",
+                "transliteration": "abrahma-bhuvanal lokah punar avartino rjuna | mam upetya tu kaunteya punar janma na vidyate",
+                "translation": "From the highest planet in the material world down to the lowest, all are places of misery wherein repeated birth and death take place. But one who attains to My abode, O son of Kunti, never takes birth again.",
+                "themes": ["liberation", "rebirth", "god", "moksha", "planets", "birth and death"],
+                "keywords": ["liberation", "rebirth", "god", "moksha", "birth", "death", "abode", "free"]
+            },
+            
+            # ─── Chapter 9: Raja Vidya Yoga ───
+            {
+                "id": "BG_9_22",
+                "chapter": 9, "verse": 22,
+                "sanskrit": "अनन्याश्चिन्तयन्तो मां ये जनाः पर्युपासते | तेषां नित्याभियुक्तानां योगक्षेमं वहाम्यहम् ||",
+                "transliteration": "ananyash cintayanto mam ye janah paryupasate | tesham nityabhiyuktanam yoga-ksemam vahamy aham",
+                "translation": "But those who always worship Me with exclusive devotion, meditating on My transcendental form—to them I carry what they lack, and I preserve what they have.",
+                "themes": ["devotion", "protection", "god", "bhakti", "worship", "divine grace"],
+                "keywords": ["devotion", "worship", "protect", "god", "carry", "preserve", "bhakti", "grace"]
+            },
+            {
+                "id": "BG_9_26",
+                "chapter": 9, "verse": 26,
+                "sanskrit": "पत्रं पुष्पं फलं तोयं यो मे भक्त्या प्रयच्छति | तदहं भक्त्युपहृतमश्नामि प्रयतात्मनः ||",
+                "transliteration": "patram pushpam phalam toyam yo me bhaktya prayacchati | tad aham bhaktyupahritam ashnami prayatatmanah",
+                "translation": "If one offers Me with love and devotion a leaf, a flower, fruit or water, I will accept it.",
+                "themes": ["devotion", "offering", "bhakti", "worship", "love", "simplicity", "god"],
+                "keywords": ["devotion", "leaf", "flower", "fruit", "water", "offering", "love", "accept", "bhakti"]
+            },
+            {
+                "id": "BG_9_27",
+                "chapter": 9, "verse": 27,
+                "sanskrit": "यत्करोषि यदश्नासि यज्जुहोषि ददासि यत् | यत्तपस्यसि कौन्तेय तत्कुरुष्व मदर्पणम् ||",
+                "transliteration": "yat karosi yad ashnasi yaj juhosi dadasi yat | yat tapasyasi kaunteya tat kurusva mad-arpanam",
+                "translation": "Whatever you do, whatever you eat, whatever you offer or give away, and whatever austerities you perform—do that, O son of Kunti, as an offering to Me.",
+                "themes": ["devotion", "offering", "surrender", "bhakti", "dedication", "god"],
+                "keywords": ["offering", "devotion", "surrender", "eat", "give", "dedication", "god", "bhakti"]
+            },
+            
+            # ─── Chapter 10: Vibhuti Yoga ───
+            {
+                "id": "BG_10_10",
+                "chapter": 10, "verse": 10,
+                "sanskrit": "तेषां सततयुक्तानां भजतां प्रीतिपूर्वकम् | ददामि बुद्धियोगं तं येन मामुपयान्ति ते ||",
+                "transliteration": "tesham satata-yuktanam bhajatam priti-purvakam | dadami buddhi-yogam tam yena mam upayanti te",
+                "translation": "To those who are constantly devoted to serving Me with love, I give the understanding by which they can come to Me.",
+                "themes": ["devotion", "wisdom", "god", "bhakti", "understanding", "love"],
+                "keywords": ["devotion", "wisdom", "god", "love", "understanding", "serve", "bhakti"]
+            },
+            
+            # ─── Chapter 11: Vishwarupa Darshana Yoga ───
+            {
+                "id": "BG_11_32",
+                "chapter": 11, "verse": 32,
+                "sanskrit": "श्रीभगवानुवाच | कालोऽस्मि लोकक्षयकृत्प्रवृद्धो लोकान्समाहर्तुमिह प्रवृत्तः | ऋतेऽपि त्वां न भविष्यन्ति सर्वे येऽवस्थिताः प्रत्यनीकेषु योधाः ||",
+                "transliteration": "shri bhagavan uvacha | kalo smi loka-kshaya-krit pravridhho lokan samahartumiha pravrittah | rite pi tvam na bhavishyanti sarve ye vasthitah pratyanikeshu yodhah",
+                "translation": "The Supreme Personality of Godhead said: Time I am, the great destroyer of the worlds, and I have come here to destroy all people. With the exception of you [the Pandavas], all the soldiers here on both sides will be slain.",
+                "themes": ["time", "destruction", "god", "death", "cosmic", "vishwarupa"],
+                "keywords": ["time", "destruction", "death", "cosmos", "god", "destroyer", "vishwarupa"]
+            },
+            
+            # ─── Chapter 12: Bhakti Yoga ───
+            {
+                "id": "BG_12_8",
+                "chapter": 12, "verse": 8,
+                "sanskrit": "मय्येव मन आधत्स्व मयि बुद्धिं निवेशय | निवसिष्यसि मय्येव अत ऊर्ध्वं न संशयः ||",
+                "transliteration": "mayy eva mana adhatsva mayi buddhim niveshaya | nivasisyasi mayy eva ata urdhvam na sanshayah",
+                "translation": "Just fix your mind upon Me, the Supreme Personality of Godhead, and engage all your intelligence in Me. Thus you will live in Me always, without a doubt.",
+                "themes": ["devotion", "mind", "god", "bhakti", "meditation", "surrender"],
+                "keywords": ["mind", "god", "devotion", "intelligence", "meditation", "surrender", "bhakti"]
+            },
+            {
+                "id": "BG_12_13",
+                "chapter": 12, "verse": 13,
+                "sanskrit": "अद्वेष्टा सर्वभूतानां मैत्रः करुण एव च | निर्ममो निरहङ्कारः समदुःखसुखः क्षमी ||",
+                "transliteration": "adveshtaa sarva-bhutanam maitrah karuna eva cha | nirmamo nirahankarah sama-duhkha-sukhah ksami",
+                "translation": "One who is not envious but is a kind friend to all living entities, who does not think himself a proprietor and is free from false ego, who is equal in both happiness and distress, who is tolerant.",
+                "themes": ["compassion", "kindness", "ego", "equality", "tolerance", "devotee", "qualities"],
+                "keywords": ["compassion", "kindness", "ego", "equality", "tolerance", "friend", "devotee"]
+            },
+            
+            # ─── Chapter 13: Kshetra-Kshetrajana Yoga ───
+            {
+                "id": "BG_13_2",
+                "chapter": 13, "verse": 2,
+                "sanskrit": "क्षेत्रज्ञं चापि मां विद्धि सर्वक्षेत्रेषु भारत | क्षेत्रक्षेत्रज्ञयोर्ज्ञानं यत्तज्ज्ञानं मतं मम ||",
+                "transliteration": "kshetra-jnam chapi mam viddhi sarva-kshetreshu bharata | kshetra-kshetrajanayoh jnanam yat taj jnanam matam mama",
+                "translation": "O scion of Bharata, you should understand that I am also the knower in all bodies, and to understand this body and its knower is called knowledge. That is My opinion.",
+                "themes": ["body", "soul", "knowledge", "knower", "field", "brahman"],
+                "keywords": ["body", "soul", "knowledge", "knower", "field", "brahman", "understand"]
+            },
+            
+            # ─── Chapter 14: Gunatraya Vibhaga Yoga ───
+            {
+                "id": "BG_14_5",
+                "chapter": 14, "verse": 5,
+                "sanskrit": "सत्त्वं रजस्तम इति गुणाः प्रकृतिसम्भवाः | निबध्नन्ति महाबाहो देहे देहिनमव्ययम् ||",
+                "transliteration": "sattvam rajas tama iti gunah prakriti-sambhavah | nibadhnanti maha-baho dehe dehinam avyayam",
+                "translation": "Material nature consists of three modes—goodness, passion and ignorance. When the eternal living entity comes in contact with nature, O mighty-armed Arjuna, he becomes conditioned by these modes.",
+                "themes": ["gunas", "nature", "sattva", "rajas", "tamas", "modes", "prakrti"],
+                "keywords": ["gunas", "sattva", "rajas", "tamas", "modes", "nature", "goodness", "passion", "ignorance"]
+            },
+            {
+                "id": "BG_14_6",
+                "chapter": 14, "verse": 6,
+                "sanskrit": "तत्र सत्त्वं निर्मलत्वात्प्रकाशकमनामयम् | सुखसङ्गेन बध्नाति ज्ञानसङ्गेन चानघ ||",
+                "transliteration": "tatra sattvam nirmalatvat prakashakam anamayam | sukha-sangena badhnati jnana-sangena cha nagha",
+                "translation": "O sinless one, the mode of goodness, being purer than the others, is illuminating, and it frees one from all sinful reactions. Those situated in that mode become conditioned by a sense of happiness and knowledge.",
+                "themes": ["sattva", "goodness", "purity", "knowledge", "happiness", "gunas"],
+                "keywords": ["sattva", "goodness", "purity", "knowledge", "happiness", "illuminating"]
+            },
+            
+            # ─── Chapter 15: Purushottama Yoga ───
+            {
+                "id": "BG_15_7",
+                "chapter": 15, "verse": 7,
+                "sanskrit": "ममैवांशो जीवलोके जीवभूतः सनातनः | मनःषष्ठानीन्द्रियाणि प्रकृतिस्थानि कर्षति ||",
+                "transliteration": "mamaivamsho jiva-loke jiva-bhutah sanatanah | manah-shashthanindriyani prakriti-sthani karshati",
+                "translation": "The living entities in this conditioned world are My eternal fragmental parts. Due to conditioned life, they are struggling very hard with the six senses, which include the mind.",
+                "themes": ["soul", "god", "part", "senses", "mind", "struggle", "eternal"],
+                "keywords": ["soul", "god", "fragment", "senses", "mind", "eternal", "part", "struggle"]
+            },
+            {
+                "id": "BG_15_15",
+                "chapter": 15, "verse": 15,
+                "sanskrit": "सर्वस्य चाहं हृदि सन्निविष्टो मत्तः स्मृतिर्ज्ञानमपोहनं च | वेदैश्च सर्वैरहमेव वेद्यो वेदान्तकृद्वेदविदेव चाहम् ||",
+                "transliteration": "sarvasya chaham hridi sannivishto mattah smritir jnanam apohanam cha | vedaish cha sarvair aham eva vedyo vedanta-krid veda-vid eva chaham",
+                "translation": "I am seated in everyone's heart, and from Me come remembrance, knowledge and forgetfulness. By all the Vedas, I am to be known. Indeed, I am the compiler of Vedanta, and I am the knower of the Vedas.",
+                "themes": ["god", "heart", "knowledge", "vedas", "memory", "consciousness"],
+                "keywords": ["god", "heart", "knowledge", "vedas", "memory", "consciousness", "vedanta"]
+            },
+            
+            # ─── Chapter 16: Daivasura Sampada Vibhaga Yoga ───
+            {
+                "id": "BG_16_1",
+                "chapter": 16, "verse": 1,
+                "sanskrit": "अभयं सत्त्वसंशुद्धिर्ज्ञानयोगव्यवस्थितिः | दानं दमश्च यज्ञश्च स्वाध्यायस्तप आर्जवम् ||",
+                "transliteration": "abhayam sattva-samshuddhi jnana-yoga-vyavasthitih | danam damash cha yajnash cha svadhyayas tapa arjavam",
+                "translation": "The Supreme Personality of Godhead said: Fearlessness; purification of one's existence; cultivation of spiritual knowledge; charity; control of the senses; performance of sacrifice; study of the Vedas; austerity; simplicity.",
+                "themes": ["divine qualities", "fearlessness", "knowledge", "charity", "austerity", "simplicity"],
+                "keywords": ["fearlessness", "purity", "knowledge", "charity", "sacrifice", "austerity", "simplicity", "divine"]
+            },
+            
+            # ─── Chapter 17: Shraddhatraya Vibhaga Yoga ───
+            {
+                "id": "BG_17_3",
+                "chapter": 17, "verse": 3,
+                "sanskrit": "सत्त्वानुरूपा सर्वस्य श्रद्धा भवति भारत | श्रद्धामयोऽयं पुरुषो यो यच्छ्रद्धः स एव सः ||",
+                "transliteration": "sattvanurupa sarvasya shraddha bhavati bharata | shraddha-mayo yam purusho yo yac-chraddhah sa eva sah",
+                "translation": "O son of Bharata, according to one's existence under the various modes of nature, one evolves a particular kind of faith. The living being is said to be of a particular faith according to the modes he has acquired.",
+                "themes": ["faith", "nature", "modes", "gunas", "belief", "character"],
+                "keywords": ["faith", "nature", "modes", "gunas", "belief", "character", "sattva"]
+            },
+            
+            # ─── Chapter 18: Moksha Sannyasa Yoga ───
+            {
+                "id": "BG_18_65",
+                "chapter": 18, "verse": 65,
+                "sanskrit": "मन्मना भव मद्भक्तो मद्याजी मां नमस्कुरु | मामेवैष्यसि सत्यं ते प्रतिजाने प्रियोऽसि मे ||",
+                "transliteration": "man-mana bhava mad-bhakto mad-yaji mam namaskuru | mam evaisyasi satyam te pratijane priyo si me",
+                "translation": "Always think of Me, become My devotee, worship Me and offer your homage unto Me. Thus you will come to Me without fail. I promise you this because you are My very dear friend.",
+                "themes": ["devotion", "friendship", "promise", "worship", "love", "god", "bhakti"],
+                "keywords": ["think", "devotion", "worship", "friend", "promise", "god", "love", "bhakti"]
+            },
+            {
+                "id": "BG_18_66",
+                "chapter": 18, "verse": 66,
+                "sanskrit": "सर्वधर्मान्परित्यज्य मामेकं शरणं व्रज | अहं त्वां सर्वपापेभ्यो मोक्षयिष्यामि मा शुचः ||",
+                "transliteration": "sarva-dharman parityajya mam ekam sharanam vraja | aham tvam sarva-papebhyo mokshayishyami ma shuchah",
+                "translation": "Abandon all varieties of religion and just surrender unto Me. I shall deliver you from all sinful reactions. Do not fear.",
+                "themes": ["surrender", "liberation", "god", "sin", "moksha", "fearlessness", "final teaching"],
+                "keywords": ["surrender", "liberation", "sin", "moksha", "fearless", "god", "refuge", "final"]
+            },
+            {
+                "id": "BG_18_78",
+                "chapter": 18, "verse": 78,
+                "sanskrit": "यत्र योगेश्वरः कृष्णो यत्र पार्थो धनुर्धरः | तत्र श्रीर्विजयो भूतिर्ध्रुवा नीतिर्मतिर्मम ||",
+                "transliteration": "yatra yogeshvarah krishno yatra partho dhanur-dharah | tatra shrir vijayo bhutir dhruva nitir matir mama",
+                "translation": "Wherever there is Krishna, the master of all mystics, and wherever there is Arjuna, the supreme archer, there will also certainly be opulence, victory, extraordinary power, and morality. That is my opinion.",
+                "themes": ["victory", "krishna", "arjuna", "power", "morality", "conclusion"],
+                "keywords": ["victory", "krishna", "arjuna", "power", "morality", "conclusion", "opulence"]
+            },
+        ]
+        
+        return corpus
+
+
+corpus_builder = BhagavadGitaCorpusBuilder()
+raw_corpus = corpus_builder.build_core_corpus()
+print(f"✅ Core corpus built: {len(raw_corpus)} verses")
+print(f"\nSample verse:")
+sample = raw_corpus[7]  # BG 2:47 - famous karma verse
+print(f"  ID: {sample['id']}")
+print(f"  Sanskrit: {sample['sanskrit'][:80]}...")
+print(f"  Translation: {sample['translation'][:100]}...")
+print(f"  Themes: {sample['themes']}")
+Cell 4: Query Generation and Dataset Augmentation
+class QueryGenerator:
+    """
+    Generates diverse retrieval queries for Sanskrit-English training.
+    
+    Strategy:
+    1. Theme-based English queries
+    2. Sanskrit keyword queries
+    3. Paraphrase queries
+    4. Conceptual queries
+    """
+    
+    def __init__(self, corpus: List[Dict]):
+        self.corpus = corpus
+        
+    def generate_training_pairs(self) -> List[Dict]:
+        """
+        Generate (query, positive_doc_id) pairs with diverse query types.
+        """
+        pairs = []
+        
+        # Template-based query generation per theme
+        theme_query_templates = {
+            "karma": [
+                "What does the Bhagavad Gita say about karma?",
+                "How should one act without expecting results?",
+                "What is nishkama karma yoga?",
+                "Explain the concept of selfless action in Hinduism",
+                "What is the philosophy of action without attachment?",
+                "How to perform duty without desire for reward?",
+                "The principle of desireless action",
+            ],
+            "duty": [
+                "What does the Gita say about performing one's duty?",
+                "Why is fulfilling duty important?",
+                "What is dharma according to Krishna?",
+                "How to fulfill responsibilities without attachment?",
+                "Swadharma and its importance",
+            ],
+            "soul": [
+                "What is the nature of the soul in Hinduism?",
+                "Is the soul immortal?",
+                "What happens to the atma after death?",
+                "Explain the concept of atman",
+                "Is the soul eternal or temporary?",
+                "What does the Gita teach about the self?",
+            ],
+            "reincarnation": [
+                "What does the Gita say about rebirth?",
+                "How does the soul transmigrate to another body?",
+                "What is the cycle of birth and death?",
+                "Explain reincarnation according to Hinduism",
+                "What is metempsychosis in Vedic philosophy?",
+            ],
+            "death": [
+                "How should one view death according to Krishna?",
+                "What happens after death?",
+                "Is death the end according to the Gita?",
+                "What does Krishna say to console Arjuna about death?",
+            ],
+            "yoga": [
+                "What are the different types of yoga in the Gita?",
+                "What is the meaning of yoga?",
+                "How to practice yoga in daily life?",
+                "What is the yoga of action?",
+            ],
+            "devotion": [
+                "What is bhakti yoga?",
+                "How to develop devotion to God?",
+                "What does Krishna say about worshipping him?",
+                "The importance of devotion in spiritual life",
+                "What simple offerings does God accept?",
+            ],
+            "mind": [
+                "How to control the mind?",
+                "Why is the mind compared to an enemy?",
+                "What does the Gita say about mental control?",
+                "How to quiet a restless mind?",
+                "Is the mind a friend or enemy?",
+            ],
+            "avatar": [
+                "Why does God incarnate on earth?",
+                "What is the purpose of divine incarnation?",
+                "When does God come to earth?",
+                "What is the meaning of avatar?",
+                "Why does Krishna appear in the world?",
+            ],
+            "liberation": [
+                "How to attain moksha?",
+                "What leads to final liberation?",
+                "How to escape the cycle of rebirth?",
+                "What is the path to liberation in Hinduism?",
+                "How does one achieve spiritual freedom?",
+            ],
+            "maya": [
+                "What is maya or illusion?",
+                "How to overcome the illusion of the material world?",
+                "What is the nature of material illusion?",
+                "How does maya affect the soul?",
+            ],
+            "gunas": [
+                "What are the three gunas?",
+                "What is the difference between sattva, rajas and tamas?",
+                "How do the modes of nature affect us?",
+                "What is the quality of goodness?",
+                "Explain sattva rajas tamas",
+            ],
+            "guru": [
+                "What is the role of a spiritual teacher?",
+                "How to approach a guru?",
+                "Why is a spiritual master important?",
+                "What does the Gita say about learning from a teacher?",
+            ],
+            "equality": [
+                "Does the Gita teach equality among all beings?",
+                "What is the concept of equal vision?",
+                "How should a wise person see all creatures?",
+                "What is brahman realization and equality?",
+            ],
+            "surrender": [
+                "What does it mean to surrender to God?",
+                "What is the final teaching of the Bhagavad Gita?",
+                "How to surrender completely to Krishna?",
+                "What does sarva-dharman parityajya mean?",
+            ],
+            "detachment": [
+                "How to be detached from results?",
+                "What is the principle of non-attachment?",
+                "How to work without being attached to outcomes?",
+            ],
+            "time": [
+                "What does Krishna say about time?",
+                "Is God the destroyer of time?",
+                "What is kala in the Gita?",
+            ],
+            "wisdom": [
+                "What is true wisdom according to the Gita?",
+                "How does a wise sage see all beings?",
+                "What qualities does a wise person have?",
+            ],
+            "sacrifice": [
+                "What is the importance of sacrifice in Hinduism?",
+                "What is yajna?",
+                "How should we dedicate our actions?",
+            ],
+        }
+        
+        # Match themes to corpus
+        for verse in self.corpus:
+            verse_themes = set(verse.get("themes", []))
+            verse_keywords = set(verse.get("keywords", []))
+            
+            # Add theme-based queries
+            for theme, queries in theme_query_templates.items():
+                if any(theme in t for t in verse_themes) or theme in verse_keywords:
+                    for query in queries:
+                        pairs.append({
+                            "query": query,
+                            "positive_id": verse["id"],
+                            "query_type": "english_theme",
+                        })
+            
+            # Add Sanskrit transliteration queries
+            pairs.append({
+                "query": verse["transliteration"][:50],
+                "positive_id": verse["id"],
+                "query_type": "transliteration",
+            })
+            
+            # Add keyword-based queries
+            for keyword in verse.get("keywords", [])[:3]:
+                if len(keyword) > 4:
+                    pairs.append({
+                        "query": f"What does the Gita say about {keyword}?",
+                        "positive_id": verse["id"],
+                        "query_type": "keyword_query",
+                    })
+                    pairs.append({
+                        "query": keyword,
+                        "positive_id": verse["id"],
+                        "query_type": "keyword_direct",
+                    })
+        
+        # Deduplicate
+        seen = set()
+        unique_pairs = []
+        for p in pairs:
+            key = (p["query"].lower()[:50], p["positive_id"])
+            if key not in seen:
+                seen.add(key)
+                unique_pairs.append(p)
+        
+        return unique_pairs
+    
+    def generate_hard_negatives(
+        self,
+        pairs: List[Dict],
+        corpus: List[Dict]
+    ) -> List[Dict]:
+        """
+        Generate hard negatives using three strategies:
+        1. Same chapter, different verse  (chapter-level hard neg)
+        2. Similar themes but different specific topic
+        3. Fully random negatives (easy negatives for contrast)
+        """
+        corpus_by_id = {v["id"]: v for v in corpus}
+        corpus_by_chapter = {}
+        for v in corpus:
+            ch = v["chapter"]
+            if ch not in corpus_by_chapter:
+                corpus_by_chapter[ch] = []
+            corpus_by_chapter[ch].append(v["id"])
+        
+        triplets = []
+        
+        for pair in pairs:
+            pos_id = pair["positive_id"]
+            if pos_id not in corpus_by_id:
+                continue
+                
+            pos_verse = corpus_by_id[pos_id]
+            pos_themes = set(pos_verse.get("themes", []))
+            
+            # Strategy 1: Same chapter hard negative
+            same_chapter_ids = [
+                vid for vid in corpus_by_chapter.get(pos_verse["chapter"], [])
+                if vid != pos_id
+            ]
+            
+            # Strategy 2: Different chapter, overlapping themes (partial theme confusion)
+            theme_overlap_ids = []
+            for v in corpus:
+                if v["id"] == pos_id:
+                    continue
+                v_themes = set(v.get("themes", []))
+                overlap = len(pos_themes & v_themes)
+                if 1 <= overlap <= 2:  # Some but not full overlap = hard neg
+                    theme_overlap_ids.append(v["id"])
+            
+            # Strategy 3: Random negatives
+            all_ids = [v["id"] for v in corpus if v["id"] != pos_id]
+            random_neg_ids = random.sample(all_ids, min(3, len(all_ids)))
+            
+            # Combine strategies
+            neg_candidates = []
+            if same_chapter_ids:
+                neg_candidates.extend(random.sample(
+                    same_chapter_ids,
+                    min(1, len(same_chapter_ids))
+                ))
+            if theme_overlap_ids:
+                neg_candidates.extend(random.sample(
+                    theme_overlap_ids,
+                    min(1, len(theme_overlap_ids))
+                ))
+            neg_candidates.extend(random.sample(random_neg_ids, min(1, len(random_neg_ids))))
+            
+            for neg_id in neg_candidates[:2]:  # Max 2 negatives per query
+                triplets.append({
+                    "query": pair["query"],
+                    "positive_id": pos_id,
+                    "negative_id": neg_id,
+                    "query_type": pair["query_type"],
+                    "neg_strategy": (
+                        "hard" if neg_id in same_chapter_ids or neg_id in theme_overlap_ids
+                        else "random"
+                    )
+                })
+        
+        return triplets
+
+
+# Build the query dataset
+query_gen = QueryGenerator(raw_corpus)
+training_pairs = query_gen.generate_training_pairs()
+triplets = query_gen.generate_hard_negatives(training_pairs, raw_corpus)
+
+print(f"📊 Dataset Statistics:")
+print(f"   Corpus size:              {len(raw_corpus)} verses")
+print(f"   Training pairs:           {len(training_pairs)}")
+print(f"   Triplets (with negatives):{len(triplets)}")
+
+# Query type distribution
+pair_types = pd.Series([p["query_type"] for p in training_pairs]).value_counts()
+print(f"\n📈 Query Type Distribution:")
+for qtype, count in pair_types.items():
+    print(f"   {qtype}: {count}")
+
+# Negative strategy distribution
+neg_strategies = pd.Series([t["neg_strategy"] for t in triplets]).value_counts()
+print(f"\n📈 Negative Strategy Distribution:")
+for strategy, count in neg_strategies.items():
+    print(f"   {strategy}: {count}")
+Cell 5: Create SentenceTransformers Training Data
+class RetrievalDataset:
+    """
+    Converts triplets to SentenceTransformers InputExample format.
+    Creates both train and eval splits.
+    """
+    
+    def __init__(
+        self,
+        triplets: List[Dict],
+        corpus: List[Dict],
+        train_ratio: float = 0.8
+    ):
+        self.corpus_by_id = {v["id"]: v for v in corpus}
+        
+        # Shuffle and split
+        shuffled = triplets.copy()
+        random.shuffle(shuffled)
+        
+        split_idx = int(len(shuffled) * train_ratio)
+        self.train_triplets = shuffled[:split_idx]
+        self.eval_triplets  = shuffled[split_idx:]
+        
+        print(f"📊 Train triplets: {len(self.train_triplets)}")
+        print(f"📊 Eval  triplets: {len(self.eval_triplets)}")
+    
+    def get_document_text(
+        self,
+        verse_id: str,
+        include_sanskrit: bool = True
+    ) -> str:
+        """
+        Returns a rich representation of a verse.
+        Combines Sanskrit + transliteration + English + themes.
+        """
+        v = self.corpus_by_id.get(verse_id, {})
+        if not v:
+            return ""
+        
+        parts = []
+        if include_sanskrit:
+            parts.append(v.get("sanskrit", ""))
+        parts.append(v.get("transliteration", ""))
+        parts.append(v.get("translation", ""))
+        themes = v.get("themes", [])
+        if themes:
+            parts.append(f"Topics: {', '.join(themes)}")
+        
+        return " | ".join(filter(None, parts))
+    
+    def to_input_examples(
+        self,
+        split: str = "train",
+        loss_type: str = "triplet"
+    ) -> List[InputExample]:
+        """
+        Convert to SentenceTransformers InputExample format.
+        
+        loss_type options:
+        - "triplet"  → (anchor, positive, negative)
+        - "cosine"   → (text_a, text_b, score)
+        - "mnrl"     → (query, positive)   [in-batch negatives]
+        """
+        triplets_split = (
+            self.train_triplets if split == "train" else self.eval_triplets
+        )
+        examples = []
+        
+        for t in triplets_split:
+            query    = t["query"]
+            pos_text = self.get_document_text(t["positive_id"])
+            neg_text = self.get_document_text(t["negative_id"])
+            
+            if not pos_text or not neg_text:
+                continue
+            
+            if loss_type == "triplet":
+                examples.append(InputExample(texts=[query, pos_text, neg_text]))
+            elif loss_type == "cosine":
+                examples.append(InputExample(texts=[query, pos_text], label=1.0))
+                examples.append(InputExample(texts=[query, neg_text], label=0.0))
+            elif loss_type == "mnrl":
+                examples.append(InputExample(texts=[query, pos_text]))
+        
+        return examples
+    
+    def get_ir_evaluator_data(self) -> Tuple[Dict, Dict, Dict]:
+        """
+        Returns data for InformationRetrievalEvaluator.
+        
+        Returns:
+            queries:       {qid: query_text}
+            corpus:        {doc_id: doc_text}
+            relevant_docs: {qid: set(doc_ids)}
+        """
+        queries = {}
+        relevant_docs = {}
+        
+        for i, t in enumerate(self.eval_triplets):
+            qid = f"q_{i}"
+            queries[qid]       = t["query"]
+            relevant_docs[qid] = {t["positive_id"]}
+        
+        corpus_dict = {
+            verse["id"]: self.get_document_text(verse["id"])
+            for verse in raw_corpus
+        }
+        
+        return queries, corpus_dict, relevant_docs
+
+
+# ── Create the dataset ──
+dataset = RetrievalDataset(triplets, raw_corpus, train_ratio=0.8)
+
+train_triplet_examples = dataset.to_input_examples("train", "triplet")
+train_mnrl_examples    = dataset.to_input_examples("train", "mnrl")
+eval_examples          = dataset.to_input_examples("eval",  "cosine")
+
+print(f"\n📊 InputExample Counts:")
+print(f"   Triplet loss examples (train): {len(train_triplet_examples)}")
+print(f"   MNRL examples (train):         {len(train_mnrl_examples)}")
+print(f"   Cosine eval examples:          {len(eval_examples)}")
+
+# Sample
+print(f"\n🔍 Sample Training Triplet:")
+ex = train_triplet_examples[0]
+print(f"   Query:    {ex.texts[0]}")
+print(f"   Positive: {ex.texts[1][:120]}...")
+print(f"   Negative: {ex.texts[2][:120]}...")
+
+# Get IR evaluator data
+ir_queries, ir_corpus, ir_relevant = dataset.get_ir_evaluator_data()
+print(f"\n📊 IR Evaluator Data:")
+print(f"   Queries:          {len(ir_queries)}")
+print(f"   Corpus documents: {len(ir_corpus)}")
+print(f"   Relevant pairs:   {sum(len(v) for v in ir_relevant.values())}")
+Cell 6: Model Training
+class EmbeddingModelTrainer:
+    """
+    Fine-tunes a multilingual embedding model for Sanskrit-English retrieval.
+    
+    Supported losses:
+    - MultipleNegativesRankingLoss  (best for retrieval)
+    - TripletLoss
+    - CosineSimilarityLoss
+    
+    Base model: multilingual-e5-small (supports 100+ languages)
+    """
+    
+    def __init__(
+        self,
+        model_name: str = "intfloat/multilingual-e5-small",
+        output_dir: str = "./sanskrit-retrieval-model"
+    ):
+        self.model_name = model_name
+        self.output_dir = output_dir
+        self.model = None
+        
+    def load_model(self) -> SentenceTransformer:
+        """Load the base model."""
+        print(f"⏳ Loading model: {self.model_name}")
+        self.model = SentenceTransformer(self.model_name, device=DEVICE)
+        print(f"✅ Model loaded!")
+        print(f"   Max sequence length: {self.model.max_seq_length}")
+        print(f"   Embedding dimension: {self.model.get_sentence_embedding_dimension()}")
+        return self.model
+    
+    def train_with_mnrl(
+        self,
+        train_examples: List[InputExample],
+        ir_queries: Dict,
+        ir_corpus: Dict,
+        ir_relevant: Dict,
+        epochs: int = 3,
+        batch_size: int = 16,
+        warmup_ratio: float = 0.1,
+    ) -> SentenceTransformer:
+        """
+        Train with MultipleNegativesRankingLoss.
+        
+        Uses all other items in the batch as in-batch negatives.
+        No explicit negative examples needed in train_examples.
+        Temperature scaling (scale=20) sharpens the similarity distribution.
+        """
+        print("\n" + "="*60)
+        print("🚀 Training with MultipleNegativesRankingLoss")
+        print("="*60)
+        
+        train_dataloader = DataLoader(
+            train_examples,
+            shuffle=True,
+            batch_size=batch_size,
+            drop_last=True,
+        )
+        
+        train_loss = losses.MultipleNegativesRankingLoss(
+            model=self.model,
+            scale=20.0,
+            similarity_fct=util.cos_sim,
+        )
+        
+        evaluator = InformationRetrievalEvaluator(
+            queries=ir_queries,
+            corpus=ir_corpus,
+            relevant_docs=ir_relevant,
+            name="sanskrit-retrieval",
+            precision_recall_at_k=[1, 3, 5, 10],
+            accuracy_at_k=[1, 3, 5, 10],
+            ndcg_at_k=[10],
+            mrr_at_k=[10],
+            show_progress_bar=True,
+            batch_size=32,
+        )
+        
+        total_steps  = len(train_dataloader) * epochs
+        warmup_steps = int(total_steps * warmup_ratio)
+        
+        print(f"   Epochs:          {epochs}")
+        print(f"   Batch size:      {batch_size}")
+        print(f"   Total steps:     {total_steps}")
+        print(f"   Warmup steps:    {warmup_steps}")
+        print(f"   Train examples:  {len(train_examples)}")
+        
+        self.model.fit(
+            train_objectives=[(train_dataloader, train_loss)],
+            evaluator=evaluator,
+            epochs=epochs,
+            warmup_steps=warmup_steps,
+            output_path=self.output_dir,
+            evaluation_steps=max(1, total_steps // (epochs * 2)),
+            save_best_model=True,
+            show_progress_bar=True,
+            checkpoint_path=os.path.join(self.output_dir, "checkpoints"),
+            checkpoint_save_steps=max(1, total_steps // epochs),
+            optimizer_params={'lr': 2e-5},
+        )
+        
+        print(f"\n✅ Training complete! Model saved to: {self.output_dir}")
+        return self.model
+    
+    def train_with_triplet(
+        self,
+        train_examples: List[InputExample],
+        epochs: int = 2,
+        batch_size: int = 16,
+    ) -> SentenceTransformer:
+        """
+        Train with TripletLoss.
+        Uses explicit (anchor, positive, negative) triplets.
+        Margin = 0.5 means pos must be at least 0.5 cosine closer than neg.
+        """
+        print("\n" + "="*60)
+        print("🔺 Training with TripletLoss")
+        print("="*60)
+        
+        train_dataloader = DataLoader(
+            train_examples,
+            shuffle=True,
+            batch_size=batch_size,
+        )
+        
+        train_loss = losses.TripletLoss(
+            model=self.model,
+            triplet_margin=0.5,
+            distance_metric=losses.TripletDistanceMetric.COSINE,
+        )
+        
+        total_steps  = len(train_dataloader) * epochs
+        warmup_steps = int(total_steps * 0.1)
+        
+        print(f"   Epochs:      {epochs}")
+        print(f"   Total steps: {total_steps}")
+        
+        self.model.fit(
+            train_objectives=[(train_dataloader, train_loss)],
+            epochs=epochs,
+            warmup_steps=warmup_steps,
+            show_progress_bar=True,
+            optimizer_params={'lr': 2e-5},
+        )
+        
+        print(f"\n✅ TripletLoss training complete!")
+        return self.model
+
+
+# ── Initialize trainer ──
+trainer = EmbeddingModelTrainer(
+    model_name="intfloat/multilingual-e5-small",
+    output_dir="./sanskrit-retrieval-model-mnrl"
+)
+model = trainer.load_model()
+print("\n✅ Model ready for baseline evaluation and training.")
+Cell 7: Evaluation Framework
+class RetrievalEvaluator:
+    """
+    Comprehensive retrieval evaluation.
+    
+    Metrics: Recall@K, MRR@K, nDCG@K, Precision@K
+    Also: qualitative analysis, error analysis, embedding visualisation.
+    """
+    
+    def __init__(
+        self,
+        model: SentenceTransformer,
+        corpus: List[Dict],
+        queries: Dict[str, str],
+        relevant_docs: Dict[str, set],
+        include_sanskrit: bool = True,
+    ):
+        self.model         = model
+        self.raw_corpus    = corpus
+        self.queries       = queries
+        self.relevant_docs = relevant_docs
+        self.corpus_by_id  = {v["id"]: v for v in corpus}
+        self.include_sanskrit = include_sanskrit
+        
+        self.corpus_ids   = [v["id"] for v in corpus]
+        self.corpus_texts = [self._get_doc_text(vid) for vid in self.corpus_ids]
+        
+    def _get_doc_text(self, verse_id: str) -> str:
+        v = self.corpus_by_id.get(verse_id, {})
+        if not v:
+            return ""
+        parts = []
+        if self.include_sanskrit:
+            parts.append(v.get("sanskrit", ""))
+        parts.append(v.get("transliteration", ""))
+        parts.append(v.get("translation", ""))
+        themes = v.get("themes", [])
+        if themes:
+            parts.append(f"Topics: {', '.join(themes)}")
+        return " | ".join(filter(None, parts))
+    
+    def encode_corpus(self, batch_size: int = 32) -> np.ndarray:
+        print("⏳ Encoding corpus...")
+        emb = self.model.encode(
+            self.corpus_texts,
+            batch_size=batch_size,
+            show_progress_bar=True,
+            convert_to_numpy=True,
+            normalize_embeddings=True,
+        )
+        print(f"✅ Corpus encoded: {emb.shape}")
+        return emb
+    
+    def encode_queries(
+        self,
+        query_texts: List[str],
+        batch_size: int = 32
+    ) -> np.ndarray:
+        return self.model.encode(
+            query_texts,
+            batch_size=batch_size,
+            show_progress_bar=False,
+            convert_to_numpy=True,
+            normalize_embeddings=True,
+        )
+    
+    def build_faiss_index(self, corpus_emb: np.ndarray) -> faiss.Index:
+        dim   = corpus_emb.shape[1]
+        index = faiss.IndexFlatIP(dim)   # cosine sim with L2-normalised vecs
+        index.add(corpus_emb.astype(np.float32))
+        print(f"✅ FAISS index built: {index.ntotal} vectors")
+        return index
+    
+    def retrieve(
+        self,
+        query_emb: np.ndarray,
+        index: faiss.Index,
+        top_k: int = 10
+    ) -> List[List[Tuple[str, float]]]:
+        scores, indices = index.search(query_emb.astype(np.float32), top_k)
+        results = []
+        for score_row, idx_row in zip(scores, indices):
+            doc_results = [
+                (self.corpus_ids[idx], float(score))
+                for score, idx in zip(score_row, idx_row)
+                if idx >= 0
+            ]
+            results.append(doc_results)
+        return results
+    
+    def compute_metrics(
+        self,
+        retrieval_results: List[List[Tuple[str, float]]],
+        query_ids: List[str],
+        k_values: List[int] = [1, 3, 5, 10]
+    ) -> Dict:
+        """
+        Compute Recall@K, Precision@K, MRR@K, nDCG@K.
+        """
+        metrics: Dict[str, List[float]] = {}
+        for k in k_values:
+            for m in ["Recall", "Precision", "MRR", "nDCG"]:
+                metrics[f"{m}@{k}"] = []
+        
+        for qid, retrieved in zip(query_ids, retrieval_results):
+            relevant      = self.relevant_docs.get(qid, set())
+            retrieved_ids = [doc_id for doc_id, _ in retrieved]
+            
+            for k in k_values:
+                top_k = retrieved_ids[:k]
+                hits  = len(set(top_k) & relevant)
+                
+                # Recall@K
+                metrics[f"Recall@{k}"].append(
+                    hits / len(relevant) if relevant else 0.0
+                )
+                # Precision@K
+                metrics[f"Precision@{k}"].append(hits / k if k > 0 else 0.0)
+                
+                # MRR@K
+                mrr = 0.0
+                for rank, doc_id in enumerate(top_k, 1):
+                    if doc_id in relevant:
+                        mrr = 1.0 / rank
+                        break
+                metrics[f"MRR@{k}"].append(mrr)
+                
+                # nDCG@K
+                dcg, ideal_dcg = 0.0, 0.0
+                for rank, doc_id in enumerate(top_k, 1):
+                    if doc_id in relevant:
+                        dcg += 1.0 / np.log2(rank + 1)
+                for rank in range(1, min(len(relevant), k) + 1):
+                    ideal_dcg += 1.0 / np.log2(rank + 1)
+                metrics[f"nDCG@{k}"].append(dcg / ideal_dcg if ideal_dcg > 0 else 0.0)
+        
+        return {k: float(np.mean(v)) for k, v in metrics.items()}
+    
+    def evaluate(
+        self,
+        name: str = "model",
+        k_values: List[int] = [1, 3, 5, 10]
+    ) -> Tuple[Dict, List, List, np.ndarray]:
+        print(f"\n{'='*60}")
+        print(f"📊 Evaluating: {name}")
+        print(f"{'='*60}")
+        
+        corpus_emb = self.encode_corpus()
+        
+        query_texts = list(self.queries.values())
+        query_ids   = list(self.queries.keys())
+        query_emb   = self.encode_queries(query_texts)
+        
+        index   = self.build_faiss_index(corpus_emb)
+        results = self.retrieve(query_emb, index, top_k=max(k_values))
+        
+        metrics = self.compute_metrics(results, query_ids, k_values)
+        
+        print(f"\n{'─'*40}")
+        print(f"{'Metric':<20} {'Score':>10}")
+        print(f"{'─'*40}")
+        for metric, score in sorted(metrics.items()):
+            print(f"  {metric:<18} {score:>10.4f}")
+        print(f"{'─'*40}")
+        
+        return metrics, results, query_ids, corpus_emb
+    
+    def qualitative_analysis(
+        self,
+        retrieval_results: List[List[Tuple[str, float]]],
+        query_ids: List[str],
+        n_examples: int = 5,
+    ):
+        print(f"\n{'='*60}")
+        print("🔍 Qualitative Analysis")
+        print(f"{'='*60}")
+        
+        successful, failures = [], []
+        for qid, results in zip(query_ids, retrieval_results):
+            relevant = self.relevant_docs.get(qid, set())
+            top1     = results[0][0] if results else None
+            if top1 in relevant:
+                successful.append((qid, results))
+            else:
+                failures.append((qid, results))
+        
+        print(f"\n✅ Successful Retrievals (showing {min(3, len(successful))}):")
+        for qid, results in successful[:3]:
+            relevant = self.relevant_docs.get(qid, set())
+            print(f"\n  Query: {self.queries[qid]}")
+            print(f"  Expected: {list(relevant)[0]}")
+            for i, (doc_id, score) in enumerate(results[:3]):
+                hit = "✓" if doc_id in relevant else "✗"
+                v   = self.corpus_by_id.get(doc_id, {})
+                print(f"    {hit} [{i+1}] {doc_id} (score={score:.3f}): "
+                      f"{v.get('translation','')[:80]}...")
+        
+        print(f"\n❌ Failed Retrievals (showing {min(3, len(failures))}):")
+        for qid, results in failures[:3]:
+            relevant    = self.relevant_docs.get(qid, set())
+            expected_id = list(relevant)[0]
+            expected_v  = self.corpus_by_id.get(expected_id, {})
+            print(f"\n  Query: {self.queries[qid]}")
+            print(f"  Expected: {expected_id}: {expected_v.get('translation','')[:80]}...")
+            for i, (doc_id, score) in enumerate(results[:3]):
+                hit = "✓" if doc_id in relevant else "✗"
+                v   = self.corpus_by_id.get(doc_id, {})
+                print(f"    {hit} [{i+1}] {doc_id} (score={score:.3f}): "
+                      f"{v.get('translation','')[:80]}...")
+
+
+# ── Baseline Evaluation ──
+print("🔍 Running BASELINE evaluation (before fine-tuning)...")
+base_evaluator = RetrievalEvaluator(
+    model=model,
+    corpus=raw_corpus,
+    queries=ir_queries,
+    relevant_docs=ir_relevant,
+)
+baseline_metrics, baseline_results, baseline_qids, baseline_corpus_emb = \
+    base_evaluator.evaluate("Baseline (multilingual-e5-small)")
+base_evaluator.qualitative_analysis(baseline_results, baseline_qids)
+Cell 8: Run Fine-Tuning
+print("🚀 Starting fine-tuning with MultipleNegativesRankingLoss...")
+print("   • Treats all other items in each batch as in-batch negatives")
+print("   • Temperature scaling (scale=20) sharpens similarity distribution")
+print("   • Most effective loss function for dense retrieval tasks")
+
+trained_model = trainer.train_with_mnrl(
+    train_examples=train_mnrl_examples,
+    ir_queries=ir_queries,
+    ir_corpus=ir_corpus,
+    ir_relevant=ir_relevant,
+    epochs=3,
+    batch_size=16,
+    warmup_ratio=0.1,
+)
+
+print("\n✅ Fine-tuning complete!")
+Cell 9: Post-Training Evaluation
+print("\n🔍 Running POST-TRAINING evaluation...")
+
+best_model_path = "./sanskrit-retrieval-model-mnrl"
+if os.path.exists(best_model_path):
+    finetuned_model = SentenceTransformer(best_model_path, device=DEVICE)
+    print(f"✅ Loaded best model from: {best_model_path}")
+else:
+    finetuned_model = trained_model
+    print("⚠️  Using in-memory trained model (no saved checkpoint found)")
+
+finetuned_evaluator = RetrievalEvaluator(
+    model=finetuned_model,
+    corpus=raw_corpus,
+    queries=ir_queries,
+    relevant_docs=ir_relevant,
+)
+
+finetuned_metrics, finetuned_results, finetuned_qids, finetuned_corpus_emb = \
+    finetuned_evaluator.evaluate("Fine-tuned Sanskrit Retrieval Model")
+finetuned_evaluator.qualitative_analysis(finetuned_results, finetuned_qids)
+Cell 10: Visualisation
+def plot_metrics_comparison(
+    baseline_metrics: Dict,
+    finetuned_metrics: Dict,
+    figsize: Tuple = (16, 12)
+):
+    fig, axes = plt.subplots(2, 2, figsize=figsize)
+    fig.suptitle(
+        "Sanskrit-English Retrieval: Baseline vs Fine-tuned\n"
+        "(multilingual-e5-small  →  Sanskrit Retrieval Model)",
+        fontsize=14, fontweight='bold', y=1.02
+    )
+    
+    colors   = {'Baseline': '#FF6B6B', 'Fine-tuned': '#4ECDC4'}
+    groups   = ['Recall', 'Precision', 'MRR', 'nDCG']
+    k_values = [1, 3, 5, 10]
+    
+    for ax, metric_name in zip(axes.flatten(), groups):
+        b_vals = [baseline_metrics.get(f"{metric_name}@{k}", 0) for k in k_values]
+        f_vals = [finetuned_metrics.get(f"{metric_name}@{k}", 0) for k in k_values]
+        
+        x, width = np.arange(len(k_values)), 0.35
+        
+        bars1 = ax.bar(x - width/2, b_vals, width,
+                       label='Baseline',   color=colors['Baseline'],
+                       alpha=0.85, edgecolor='black', linewidth=0.5)
+        bars2 = ax.bar(x + width/2, f_vals, width,
+                       label='Fine-tuned', color=colors['Fine-tuned'],
+                       alpha=0.85, edgecolor='black', linewidth=0.5)
+        
+        for bar in bars1:
+            h = bar.get_height()
+            ax.text(bar.get_x() + bar.get_width()/2., h + 0.005,
+                    f'{h:.3f}', ha='center', va='bottom', fontsize=8)
+        for bar in bars2:
+            h = bar.get_height()
+            ax.text(bar.get_x() + bar.get_width()/2., h + 0.005,
+                    f'{h:.3f}', ha='center', va='bottom', fontsize=8)
+        
+        for i, (bv, fv) in enumerate(zip(b_vals, f_vals)):
+            delta = fv - bv
+            color = '#2ecc71' if delta > 0 else '#e74c3c'
+            ax.annotate(
+                f'{delta:+.3f}',
+                xy=(i + width/2, fv),
+                xytext=(i + width/2, max(fv, bv) + 0.04),
+                fontsize=7, color=color, ha='center',
+                arrowprops=dict(arrowstyle='->', color=color, lw=1)
+            )
+        
+        ax.set_xlabel('K value', fontsize=11)
+        ax.set_ylabel(metric_name, fontsize=11)
+        ax.set_title(f'{metric_name}@K Comparison', fontsize=12, fontweight='bold')
+        ax.set_xticks(x)
+        ax.set_xticklabels([f'@{k}' for k in k_values])
+        ax.legend(fontsize=10)
+        ax.set_ylim(0, min(1.1, max(max(b_vals), max(f_vals)) + 0.15))
+        ax.grid(axis='y', alpha=0.3, linestyle='--')
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+    
+    plt.tight_layout()
+    plt.savefig('retrieval_metrics_comparison.png', dpi=150, bbox_inches='tight')
+    plt.show()
+    print("✅ Metrics comparison plot saved!")
+
+
+def plot_improvement_heatmap(
+    baseline_metrics: Dict,
+    finetuned_metrics: Dict
+):
+    metrics  = ['Recall', 'Precision', 'MRR', 'nDCG']
+    k_values = [1, 3, 5, 10]
+    
+    matrix = np.zeros((len(metrics), len(k_values)))
+    for i, m in enumerate(metrics):
+        for j, k in enumerate(k_values):
+            key       = f"{m}@{k}"
+            matrix[i, j] = finetuned_metrics.get(key, 0) - baseline_metrics.get(key, 0)
+    
+    fig, ax = plt.subplots(figsize=(10, 5))
+    im = ax.imshow(matrix, cmap='RdYlGn', aspect='auto', vmin=-0.3, vmax=0.3)
+    
+    ax.set_xticks(range(len(k_values)))
+    ax.set_xticklabels([f'@{k}' for k in k_values], fontsize=12)
+    ax.set_yticks(range(len(metrics)))
+    ax.set_yticklabels(metrics, fontsize=12)
+    
+    for i in range(len(metrics)):
+        for j in range(len(k_values)):
+            val   = matrix[i, j]
+            color = 'white' if abs(val) > 0.15 else 'black'
+            ax.text(j, i, f'{val:+.3f}', ha='center', va='center',
+                    fontsize=11, color=color, fontweight='bold')
+    
+    plt.colorbar(im, ax=ax, label='Improvement (Fine-tuned − Baseline)')
+    ax.set_title(
+        'Metric Improvement Heatmap\n(Green = Better, Red = Worse)',
+        fontsize=13, fontweight='bold'
+    )
+    plt.tight_layout()
+    plt.savefig('improvement_heatmap.png', dpi=150, bbox_inches='tight')
+    plt.show()
+    print("✅ Improvement heatmap saved!")
+
+
+plot_metrics_comparison(baseline_metrics, finetuned_metrics)
+plot_improvement_heatmap(baseline_metrics, finetuned_metrics)
+
+# ── Summary table ──
+print("\n" + "="*65)
+print("📊 METRICS SUMMARY: Baseline vs Fine-tuned")
+print("="*65)
+print(f"{'Metric':<20} {'Baseline':>12} {'Fine-tuned':>12} {'Delta':>10}")
+print("-"*65)
+
+for metric_prefix in ['Recall', 'MRR', 'nDCG', 'Precision']:
+    for k in [1, 3, 5, 10]:
+        key     = f"{metric_prefix}@{k}"
+        b_val   = baseline_metrics.get(key, 0)
+        f_val   = finetuned_metrics.get(key, 0)
+        delta   = f_val - b_val
+        indicator = "↑" if delta > 0.001 else ("↓" if delta < -0.001 else "≈")
+        print(f"  {key:<18} {b_val:>12.4f} {f_val:>12.4f} {delta:>+10.4f} {indicator}")
+
+print("="*65)
+Cell 11: Embedding Space Visualisation
+def visualize_embedding_space(
+    model: SentenceTransformer,
+    corpus: List[Dict],
+    title: str = "Embedding Space",
+    figsize: Tuple = (14, 10)
+) -> np.ndarray:
+    """t-SNE visualisation coloured by chapter."""
+    
+    corpus_texts, chapters, verse_ids = [], [], []
+    for v in corpus:
+        text = " | ".join(filter(None, [
+            v.get("transliteration", ""),
+            v.get("translation", ""),
+        ]))
+        corpus_texts.append(text)
+        chapters.append(v["chapter"])
+        verse_ids.append(v["id"])
+    
+    sample_queries = [
+        "What is karma?",
+        "Soul is eternal and cannot be destroyed",
+        "How to meditate?",
+        "What is dharma?",
+        "Surrender to God",
+        "Control the mind",
+    ]
+    
+    all_texts  = corpus_texts + sample_queries
+    embeddings = model.encode(all_texts, normalize_embeddings=True,
+                              show_progress_bar=False)
+    
+    print("⏳ Running t-SNE...")
+    tsne   = TSNE(n_components=2,
+                  perplexity=min(15, len(all_texts) - 1),
+                  random_state=SEED, max_iter=1000,
+                  learning_rate='auto', init='pca')
+    emb_2d = tsne.fit_transform(embeddings)
+    
+    fig, ax = plt.subplots(figsize=figsize)
+    num_ch  = max(chapters)
+    cmap    = plt.cm.get_cmap('tab20', num_ch)
+    
+    for i, (x, y) in enumerate(emb_2d[:len(corpus)]):
+        color = cmap(chapters[i] - 1)
+        ax.scatter(x, y, c=[color], s=80, alpha=0.7,
+                   edgecolors='white', linewidth=0.5)
+        ax.annotate(
+            verse_ids[i].replace("BG_", ""), (x, y),
+            fontsize=6, alpha=0.6, ha='center', va='bottom'
+        )
+    
+    for i, q in enumerate(sample_queries):
+        x, y = emb_2d[len(corpus) + i]
+        ax.scatter(x, y, c='red', s=200, marker='*', zorder=5,
+                   edgecolors='black', linewidth=1)
+        ax.annotate(f'Q: {q[:25]}', (x, y),
+                    fontsize=8, fontweight='bold', color='darkred',
+                    xytext=(5, 5), textcoords='offset points')
+    
+    from matplotlib.patches import Patch
+    legend_els = [
+        Patch(facecolor=cmap(ch-1), label=f'Chapter {ch}')
+        for ch in sorted(set(chapters))
+    ]
+    legend_els.append(plt.scatter([], [], c='red', marker='*', s=200, label='Query'))
+    ax.legend(handles=legend_els, loc='upper left', fontsize=8,
+              ncol=2, framealpha=0.7)
+    
+    ax.set_title(f'{title}\n(t-SNE — coloured by chapter)',
+                 fontsize=13, fontweight='bold')
+    ax.set_xlabel('t-SNE Dimension 1')
+    ax.set_ylabel('t-SNE Dimension 2')
+    ax.grid(alpha=0.2, linestyle='--')
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    
+    safe_title = title.lower().replace(" ", "_")
+    plt.tight_layout()
+    plt.savefig(f'tsne_{safe_title}.png', dpi=150, bbox_inches='tight')
+    plt.show()
+    return emb_2d
+
+
+print("📊 Visualising BASELINE embedding space...")
+emb_baseline = visualize_embedding_space(
+    model=model,
+    corpus=raw_corpus,
+    title="Baseline Model Embedding Space"
+)
+
+print("\n📊 Visualising FINE-TUNED embedding space...")
+emb_finetuned = visualize_embedding_space(
+    model=finetuned_model,
+    corpus=raw_corpus,
+    title="Fine-tuned Model Embedding Space"
+)
+Cell 12: Mini RAG Demo
+class SanskritRAGSystem:
+    """
+    Retrieval-Augmented Generation demo for Sanskrit-English queries.
+    
+    Pipeline:
+      Query → Embed → FAISS Retrieve → Format context
+    
+    In a production system the formatted context would be passed
+    to an LLM (LLaMA-3, Mistral, etc.) for generation.
+    """
+    
+    def __init__(
+        self,
+        model: SentenceTransformer,
+        corpus: List[Dict],
+        top_k: int = 3,
+    ):
+        self.model        = model
+        self.corpus       = corpus
+        self.corpus_by_id = {v["id"]: v for v in corpus}
+        self.top_k        = top_k
+        
+        print("⏳ Building RAG retrieval index...")
+        self._build_index()
+        print("✅ RAG system ready!")
+    
+    def _get_doc_text(self, verse: Dict) -> str:
+        return " | ".join(filter(None, [
+            verse.get("sanskrit", ""),
+            verse.get("transliteration", ""),
+            verse.get("translation", ""),
+            f"Themes: {', '.join(verse.get('themes', []))}",
+        ]))
+    
+    def _build_index(self):
+        self.corpus_ids   = [v["id"] for v in self.corpus]
+        self.corpus_texts = [self._get_doc_text(v) for v in self.corpus]
+        self.corpus_emb   = self.model.encode(
+            self.corpus_texts, normalize_embeddings=True,
+            show_progress_bar=False,
+        )
+        dim        = self.corpus_emb.shape[1]
+        self.index = faiss.IndexFlatIP(dim)
+        self.index.add(self.corpus_emb.astype(np.float32))
+    
+    def retrieve(self, query: str) -> List[Dict]:
+        q_emb          = self.model.encode(
+            [query], normalize_embeddings=True, show_progress_bar=False
+        )
+        scores, indices = self.index.search(q_emb.astype(np.float32), self.top_k)
+        
+        results = []
+        for score, idx in zip(scores[0], indices[0]):
+            if idx >= 0:
+                v = self.corpus[idx].copy()
+                v["retrieval_score"] = float(score)
+                results.append(v)
+        return results
+    
+    def format_response(self, query: str, verses: List[Dict]) -> str:
+        all_themes = []
+        for v in verses:
+            all_themes.extend(v.get("themes", []))
+        unique_themes = list(dict.fromkeys(all_themes))[:5]  # preserve order
+        chapters      = sorted({v["chapter"] for v in verses})
+        
+        lines = [
+            "",
+            "╔══════════════════════════════════════════════════════════════╗",
+            "║         SANSKRIT-ENGLISH RETRIEVAL SYSTEM (RAG Demo)        ║",
+            "╚══════════════════════════════════════════════════════════════╝",
+            "",
+            f"📝 QUERY: {query}",
+            "",
+            "="*65,
+            f"📚 RETRIEVED PASSAGES (Top-{len(verses)}):",
+            "="*65,
+        ]
+        
+        for i, v in enumerate(verses, 1):
+            lines += [
+                "",
+                "┌" + "─"*63 + "┐",
+                f"│ Result #{i}  │  {v['id']}  │  "
+                f"Chapter {v['chapter']}, Verse {v['verse']}  │  "
+                f"Score: {v['retrieval_score']:.3f}",
+                "├" + "─"*63 + "┤",
+                f"│ 🕉️  SANSKRIT:",
+                f"│   {v.get('sanskrit','')[:100]}...",
+                f"│",
+                f"│ 🔤 TRANSLITERATION:",
+                f"│   {v.get('transliteration','')[:100]}...",
+                f"│",
+                f"│ 📖 TRANSLATION:",
+                f"│   {v.get('translation','')}",
+                f"│",
+                f"│ 🏷️  THEMES: {', '.join(v.get('themes', []))}",
+                "└" + "─"*63 + "┘",
+            ]
+        
+        lines += [
+            "",
+            "="*65,
+            "💡 CONTEXTUAL SUMMARY:",
+            f"   Query covers themes: {', '.join(unique_themes)}",
+            f"   Relevant chapters:   {chapters}",
+            "",
+            "   ➡  In a full RAG pipeline these passages would be passed",
+            "      as context to an LLM to generate a grounded answer.",
+            "="*65,
+            "",
+        ]
+        return "\n".join(lines)
+    
+    def query(self, question: str) -> str:
+        return self.format_response(question, self.retrieve(question))
+
+
+# ── Initialise and demo ──
+rag = SanskritRAGSystem(model=finetuned_model, corpus=raw_corpus, top_k=3)
+
+test_queries = [
+    "What does the Gita say about karma?",
+    "कर्म का सिद्धांत क्या है?",          # Hindi query
+    "How should one deal with grief?",
+    "What is the teaching about the immortal soul?",
+    "yada yada hi dharmasya",               # transliteration query
+    "How to control a restless mind?",
+    "What happens after death according to Krishna?",
+    "What simple offerings does God accept?",
+]
+
+for q in test_queries:
+    print(rag.query(q))
+    print("▓"*65 + "\n")
+Cell 13: Error Analysis
+class ErrorAnalyzer:
+    """
+    Systematic error analysis to understand model failure modes.
+    
+    Failure types:
+    - same_chapter_confusion : retrieved correct chapter, wrong verse
+    - theme_confusion        : retrieved verse with partial theme overlap
+    - wrong_retrieval        : no meaningful overlap with expected verse
+    """
+    
+    def __init__(self, evaluator: RetrievalEvaluator, corpus: List[Dict]):
+        self.evaluator    = evaluator
+        self.corpus       = corpus
+        self.corpus_by_id = {v["id"]: v for v in corpus}
+    
+    def analyze_failures(
+        self,
+        retrieval_results: List[List[Tuple[str, float]]],
+        query_ids: List[str],
+        queries: Dict[str, str],
+        relevant_docs: Dict[str, set],
+    ) -> Tuple[pd.DataFrame, pd.DataFrame]:
+        
+        failures, successes = [], []
+        
+        for qid, results in zip(query_ids, retrieval_results):
+            relevant      = relevant_docs.get(qid, set())
+            retrieved_ids = [d for d, _ in results]
+            
+            correct_rank = next(
+                (rank for rank, did in enumerate(retrieved_ids, 1)
+                 if did in relevant),
+                None
+            )
+            
+            expected_id = list(relevant)[0] if relevant else None
+            expected_v  = self.corpus_by_id.get(expected_id, {})
+            top1_id     = retrieved_ids[0] if retrieved_ids else None
+            top1_v      = self.corpus_by_id.get(top1_id, {})
+            
+            record = {
+                "query_id":        qid,
+                "query":           queries[qid],
+                "expected_id":     expected_id,
+                "expected_chapter":expected_v.get("chapter"),
+                "top1_id":         top1_id,
+                "top1_chapter":    top1_v.get("chapter"),
+                "top1_score":      results[0][1] if results else 0,
+                "correct_rank":    correct_rank,
+                "success_at_1":    correct_rank == 1,
+                "success_at_3":    correct_rank is not None and correct_rank <= 3,
+                "success_at_5":    correct_rank is not None and correct_rank <= 5,
+            }
+            
+            if correct_rank == 1:
+                successes.append(record)
+            else:
+                if expected_v.get("chapter") == top1_v.get("chapter"):
+                    record["failure_type"] = "same_chapter_confusion"
+                elif set(expected_v.get("themes", [])) & set(top1_v.get("themes", [])):
+                    record["failure_type"] = "theme_confusion"
+                else:
+                    record["failure_type"] = "wrong_retrieval"
+                failures.append(record)
+        
+        total = len(failures) + len(successes)
+        print(f"\n{'='*65}")
+        print(f"📊 Error Analysis Report")
+        print(f"{'='*65}")
+        print(f"  Total queries:  {total}")
+        print(f"  Success @1:     {len(successes)}  ({100*len(successes)/total:.1f}%)")
+        print(f"  Failure @1:     {len(failures)}  ({100*len(failures)/total:.1f}%)")
+        
+        df_fail = pd.DataFrame(failures)
+        df_succ = pd.DataFrame(successes)
+        
+        if len(df_fail) > 0 and "failure_type" in df_fail.columns:
+            print(f"\n  Failure breakdown:")
+            for ft, cnt in df_fail["failure_type"].value_counts().items():
+                print(f"    {ft}: {cnt}  ({100*cnt/len(df_fail):.1f}%)")
+        
+        all_records = failures + successes
+        df_all = pd.DataFrame(all_records)
+        for k in [1, 3, 5]:
+            col = f"success_at_{k}"
+            if col in df_all.columns:
+                print(f"\n  Recall@{k}: {df_all[col].mean():.4f}")
+        
+        return df_fail, df_succ
+    
+    def plot_rank_distribution(
+        self,
+        retrieval_results: List[List[Tuple[str, float]]],
+        query_ids: List[str],
+        relevant_docs: Dict[str, set],
+        model_name: str = "Model",
+    ):
+        ranks, not_found = [], 0
+        
+        for qid, results in zip(query_ids, retrieval_results):
+            relevant      = relevant_docs.get(qid, set())
+            retrieved_ids = [d for d, _ in results]
+            found = False
+            for rank, did in enumerate(retrieved_ids, 1):
+                if did in relevant:
+                    ranks.append(rank)
+                    found = True
+                    break
+            if not found:
+                not_found += 1
+        
+        fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+        
+        # Rank histogram
+        ax = axes[0]
+        if ranks:
+            ax.hist(ranks, bins=range(1, max(ranks) + 2),
+                    color='#4ECDC4', edgecolor='black', alpha=0.8, align='left')
+        for xv, label, c in [(1, 'Rank 1', 'green'),
+                              (3, 'Rank 3', 'orange'),
+                              (5, 'Rank 5', 'red')]:
+            ax.axvline(x=xv, color=c, linestyle='--', label=label, linewidth=2)
+        ax.set_xlabel('Rank of Correct Answer', fontsize=12)
+        ax.set_ylabel('Count', fontsize=12)
+        ax.set_title(f'{model_name}\nRank Distribution', fontsize=12, fontweight='bold')
+        ax.legend(fontsize=10)
+        ax.grid(alpha=0.3)
+        
+        # Cumulative recall
+        ax    = axes[1]
+        total = len(ranks) + not_found
+        kvs   = list(range(1, 12))
+        cum   = [sum(1 for r in ranks if r <= k) / total for k in kvs]
+        ax.plot(kvs, cum, 'o-', color='#4ECDC4', linewidth=2.5, markersize=8)
+        ax.fill_between(kvs, 0, cum, alpha=0.2, color='#4ECDC4')
+        ax.set_xlabel('K', fontsize=12)
+        ax.set_ylabel('Recall@K', fontsize=12)
+        ax.set_title(f'{model_name}\nCumulative Recall@K', fontsize=12, fontweight='bold')
+        ax.set_xticks(kvs)
+        ax.set_ylim(0, 1.05)
+        ax.grid(alpha=0.3)
+        
+        plt.tight_layout()
+        safe = model_name.lower().replace(" ", "_")
+        plt.savefig(f'rank_dist_{safe}.png', dpi=150, bbox_inches='tight')
+        plt.show()
+        print(f"  Not found in top-10: {not_found}/{total} ({100*not_found/total:.1f}%)")
+
+
+error_analyzer = ErrorAnalyzer(finetuned_evaluator, raw_corpus)
+
+df_failures, df_successes = error_analyzer.analyze_failures(
+    finetuned_results, finetuned_qids, ir_queries, ir_relevant
+)
+
+error_analyzer.plot_rank_distribution(
+    baseline_results,  baseline_qids,  ir_relevant, "Baseline Model"
+)
+error_analyzer.plot_rank_distribution(
+    finetuned_results, finetuned_qids, ir_relevant, "Fine-tuned Model"
+)
+Cell 14: Ablation — TripletLoss
+print("🔬 Ablation Study: TripletLoss vs MultipleNegativesRankingLoss")
+print("   This compares two contrastive objectives on the same dataset.")
+
+triplet_model = SentenceTransformer("intfloat/multilingual-e5-small", device=DEVICE)
+
+triplet_trainer = EmbeddingModelTrainer(
+    model_name="intfloat/multilingual-e5-small",
+    output_dir="./sanskrit-retrieval-triplet"
+)
+triplet_trainer.model = triplet_model
+
+trained_triplet = triplet_trainer.train_with_triplet(
+    train_examples=train_triplet_examples,
+    epochs=2,
+    batch_size=16,
+)
+
+triplet_evaluator = RetrievalEvaluator(
+    model=trained_triplet,
+    corpus=raw_corpus,
+    queries=ir_queries,
+    relevant_docs=ir_relevant,
+)
+
+triplet_metrics, triplet_results, triplet_qids, _ = \
+    triplet_evaluator.evaluate("TripletLoss Model")
+
+# ── Three-way comparison ──
+print("\n" + "="*75)
+print("📊 THREE-WAY COMPARISON: Baseline  vs  MNRL  vs  TripletLoss")
+print("="*75)
+print(f"{'Metric':<20} {'Baseline':>12} {'MNRL':>12} {'TripletLoss':>12}")
+print("-"*75)
+
+for prefix in ['Recall', 'MRR', 'nDCG']:
+    for k in [1, 3, 5, 10]:
+        key   = f"{prefix}@{k}"
+        b_val = baseline_metrics.get(key, 0)
+        m_val = finetuned_metrics.get(key, 0)
+        t_val = triplet_metrics.get(key, 0)
+        best  = max(b_val, m_val, t_val)
+        
+        fmt = lambda v: f"{'*' if v == best else ' '}{v:.4f}"
+        print(f"  {key:<18} {fmt(b_val):>12} {fmt(m_val):>12} {fmt(t_val):>12}")
+
+print("="*75)
+print("  * = best performing model for this metric")
+Cell 15: Final Summary Report
+def generate_final_report(
+    baseline_metrics: Dict,
+    finetuned_metrics: Dict,
+    triplet_metrics: Dict,
+    corpus: List[Dict],
+    training_pairs: List[Dict],
+    triplets_data: List[Dict],
+) -> str:
+    
+    # ── compute aggregate improvements ──
+    k_vals   = [1, 3, 5, 10]
+    prefixes = ["Recall", "MRR", "nDCG", "Precision"]
+    
+    improvements = {}
+    for p in prefixes:
+        for k in k_vals:
+            key = f"{p}@{k}"
+            improvements[key] = (
+                finetuned_metrics.get(key, 0) - baseline_metrics.get(key, 0)
+            )
+    
+    avg_improvement = np.mean(list(improvements.values()))
+    best_metric_key = max(improvements, key=lambda x: improvements[x])
+    best_improvement = improvements[best_metric_key]
+    
+    # ── chapter coverage ──
+    chapters = sorted({v["chapter"] for v in corpus})
+    
+    # ── neg strategy ──
+    hard_negs   = sum(1 for t in triplets_data if t["neg_strategy"] == "hard")
+    random_negs = sum(1 for t in triplets_data if t["neg_strategy"] == "random")
+    
+    report = f"""
+╔══════════════════════════════════════════════════════════════════╗
+║     SANSKRIT-ENGLISH RETRIEVAL SYSTEM — FINAL REPORT           ║
+╚══════════════════════════════════════════════════════════════════╝
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+1. DATASET SUMMARY
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  Source       : Bhagavad Gita (public domain translations)
+  Corpus size  : {len(corpus)} verses
+  Chapters     : {len(chapters)} ({min(chapters)}–{max(chapters)})
+  Languages    : Sanskrit (Devanagari), Transliteration, English
+  
+  Training pairs  : {len(training_pairs)} (query → positive verse)
+  Triplets total  : {len(triplets_data)}
+    ├─ Hard negatives  : {hard_negs}  (same-chapter or theme-overlap)
+    └─ Random negatives: {random_negs}
+
+  Query types:
+    • english_theme   — template queries matched to verse themes
+    • keyword_query   — "What does the Gita say about <keyword>?"
+    • keyword_direct  — bare keyword matching
+    • transliteration — first 50 chars of romanised Sanskrit
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+2. MODEL ARCHITECTURE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  Base model   : intfloat/multilingual-e5-small
+  Parameters   : ~117 M
+  Embedding dim: 384
+  Max seq len  : 512 tokens
+  Languages    : 100+ (including Sanskrit / Indic scripts)
+  Architecture : 12-layer transformer encoder (XLM-RoBERTa backbone)
+  Pooling      : Mean pooling over token embeddings
+  
+  Why multilingual-e5-small?
+    ✓ Designed for multilingual semantic similarity & retrieval
+    ✓ Supports Devanagari Unicode out-of-the-box
+    ✓ Small enough to fine-tune on free Colab T4 (< 2 GB VRAM)
+    ✓ Competitive with larger models on cross-lingual retrieval
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+3. TRAINING METHODOLOGY
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  Primary loss : MultipleNegativesRankingLoss (MNRL)
+  ─────────────────────────────────────────────────────────────
+  Mechanism:
+    For a batch of (query_i, positive_i) pairs, MNRL treats
+    all positive_j (j ≠ i) as negatives for query_i.
+    
+    Objective: maximise cosine similarity of (q_i, pos_i)
+               while minimising similarity of (q_i, pos_j≠i).
+
+    Loss = -log [ exp(sim(q, pos) / τ) /
+                  Σ_j exp(sim(q, pos_j) / τ) ]
+    
+    where τ = 1/scale = 1/20 = 0.05  (temperature).
+
+  Effective negatives per sample: batch_size − 1 = 15
+  
+  Ablation loss: TripletLoss
+    Loss = max(0, d(a,p) − d(a,n) + margin)
+    margin = 0.5, distance = cosine
+  
+  Training config:
+    Epochs        : 3  (MNRL),  2 (TripletLoss)
+    Batch size    : 16
+    Learning rate : 2e-5  (AdamW)
+    Warmup ratio  : 10%
+    Scheduler     : Linear warmup + linear decay
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+4. NEGATIVE SAMPLING STRATEGY
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  Three-tier hard negative mining:
+
+  Tier 1 – Same-chapter hard negatives
+    Verses from the same chapter share rhetorical context,
+    vocabulary, and sometimes themes, making them confusable.
+    Example: BG_2_47 (karma) ↔ BG_2_20 (soul immortality)
+    — both in Ch.2 but discuss different aspects.
+
+  Tier 2 – Theme-overlap hard negatives
+    Verses with 1–2 shared themes but different primary message.
+    Example: Query "What is yoga?" may confuse BG_2_48 (yoga of
+    equanimity) and BG_6_17
